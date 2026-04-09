@@ -5,3 +5,4 @@
 . ./install-scripts/jq.sh
 . ./install-scripts/nmap.sh
 . ./install-scripts/kanshi.sh
+. ./install-scripts/opencode.sh
