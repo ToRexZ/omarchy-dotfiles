@@ -27,24 +27,28 @@ detach = "prefix+d"
 copy_mode = "prefix+["
 
 # Panes
-split_horizontal = ["prefix+h", "alt+enter"]
-split_vertical = ["prefix+v", "alt+shift+enter"]
+# tmux split on `bind - split-window -v` and `bind | split-window -h`. herdr
+# names a split after the divider it draws, which is the same way round.
+split_horizontal = ["prefix+minus", "alt+enter"]
+split_vertical = ["prefix+|", "alt+shift+enter"]
 close_pane = ["prefix+x", "alt+esc"]
 zoom = "prefix+z"
 last_pane = "prefix+;"
 
-focus_pane_left = "ctrl+alt+left"
-focus_pane_down = "ctrl+alt+down"
-focus_pane_up = "ctrl+alt+up"
-focus_pane_right = "ctrl+alt+right"
+# select-pane -L/-D/-U/-R
+focus_pane_left = "prefix+h"
+focus_pane_down = "prefix+j"
+focus_pane_up = "prefix+k"
+focus_pane_right = "prefix+l"
+
+# resize-pane -L/-D/-U/-R. tmux bound these with `-r` so the prefix stays live
+# for repeats; herdr has no such flag, so resize_mode below covers held resizing.
+resize_pane_left = "prefix+shift+h"
+resize_pane_down = "prefix+shift+j"
+resize_pane_up = "prefix+shift+k"
+resize_pane_right = "prefix+shift+l"
 
 resize_mode = ["prefix+ctrl+left", "prefix+ctrl+down", "prefix+ctrl+up", "prefix+ctrl+right"]
-
-# Like resize-pane on C-M-S-arrows
-resize_pane_left = "ctrl+alt+shift+left"
-resize_pane_down = "ctrl+alt+shift+down"
-resize_pane_up = "ctrl+alt+shift+up"
-resize_pane_right = "ctrl+alt+shift+right"
 
 # No tmux equivalent; herdr's default prefix+shift+p is taken by previous session
 rename_pane = "prefix+shift+o"
@@ -52,7 +56,8 @@ rename_pane = "prefix+shift+o"
 # Windows -> tabs
 new_tab = "prefix+c"
 rename_tab = "prefix+r"
-close_tab = "prefix+k"
+# kill-window sat on `bind W`; herdr's default prefix+k is now focus_pane_up.
+close_tab = "prefix+shift+w"
 switch_tab = ["prefix+1..9", "alt+1..9"]
 previous_tab = ["prefix+p", "alt+left"]
 next_tab = ["prefix+n", "alt+right"]
@@ -64,9 +69,34 @@ move_tab_next = "alt+shift+right"
 # Sessions -> workspaces
 new_workspace = "prefix+shift+c"
 rename_workspace = "prefix+shift+r"
-close_workspace = "prefix+shift+k"
+# tmux put kill-session on `bind K`, but that line shadowed its own
+# `bind -r K resize-pane -U 5`, so resize-up never fired there. herdr rejects
+# the duplicate outright, so kill-session moves aside and the resize row wins.
+close_workspace = "prefix+shift+x"
 previous_workspace = ["prefix+shift+p", "alt+up"]
 next_workspace = ["prefix+shift+n", "alt+down"]
+
+# Agents. herdr ships these unset. Agents cut across tabs and workspaces, so
+# rather than a third p/n tier they get their own keys.
+previous_agent = "prefix+,"
+next_agent = "prefix+."
+focus_agent = "prefix+shift+1..9"
+
+# tmux swapped panes with `bind { swap-pane -U` / `bind } swap-pane -D`, which
+# walked pane index order and offered no left/right. herdr's swaps are spatial
+# and four-way, so they take the third hjkl tier instead: bare prefix focuses,
+# prefix+shift resizes, prefix+ctrl swaps. Same layering as SUPER / SUPER+CTRL
+# on hjkl in dotfiles/hypr/bindings.lua. resize_mode keeps prefix+ctrl+arrows,
+# so the ctrl tier splits cleanly: letters swap, arrows resize.
+swap_pane_left = "prefix+ctrl+h"
+swap_pane_down = "prefix+ctrl+j"
+swap_pane_up = "prefix+ctrl+k"
+swap_pane_right = "prefix+ctrl+l"
+
+# Worktrees. herdr defaults new_worktree to prefix+shift+g and leaves the
+# other two unset; useful for putting an agent on its own branch.
+open_worktree = "prefix+shift+f"
+remove_worktree = "prefix+shift+d"
 
 [ui]
 accent = "blue"
