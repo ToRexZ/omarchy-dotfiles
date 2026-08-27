@@ -4,5 +4,5 @@
 . ./install-scripts/yq.sh
 . ./install-scripts/jq.sh
 . ./install-scripts/nmap.sh
-. ./install-scripts/kanshi.sh
+. ./install-scripts/hyprdynamicmonitors.sh
 . ./install-scripts/opencode.sh

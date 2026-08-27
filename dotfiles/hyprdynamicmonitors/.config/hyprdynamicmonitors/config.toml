@@ -1,0 +1,123 @@
+# hyprdynamicmonitors -- monitor layout profiles, one per physical location.
+#
+# Managed in ~/omarchy_configuration/omarchy-dotfiles. The whole
+# ~/.config/hyprdynamicmonitors directory is a stow symlink into the repo, so
+# profiles created with the TUI (SUPER+M) land in git automatically.
+#
+# Edit layouts with the TUI, not by hand:  SUPER+M
+# Capture the current displays as a new profile:
+#   hyprdynamicmonitors freeze --profile-name <name>
+#
+# `freeze` records config_file as an absolute path. Rewrite it to $HOME/... the
+# way the profiles below do, otherwise the profile only resolves for this user.
+#
+# post_apply_exec is what makes a rendered profile take effect: Omarchy runs
+# Hyprland's Lua config provider, under which hyprdynamicmonitors' own
+# `hyprctl keyword monitor` apply path is rejected ("keyword can't work with
+# non-legacy parsers"). `hyprctl reload` re-runs hyprland.lua, and
+# ~/.config/hypr/monitors.lua replays the rendered monitors.conf through
+# hl.monitor().
+
+[general]
+post_apply_exec = "hyprctl reload"
+destination = "$HOME/.config/hypr/monitors.conf"
+
+[power_events]
+
+[power_events.dbus_query_object]
+path = "/org/freedesktop/UPower/devices/line_power_ADP0"
+
+[[power_events.dbus_signal_match_rules]]
+object_path = "/org/freedesktop/UPower/devices/line_power_ADP0"
+
+
+[profiles.home_ultrawide]
+config_file = "$HOME/.config/hyprdynamicmonitors/hyprconfigs/home_ultrawide.go.tmpl"
+config_file_type = "template"
+[profiles.home_ultrawide.conditions]
+
+[[profiles.home_ultrawide.conditions.required_monitors]]
+description = "EDO EF10QBC64.C"
+monitor_tag = "monitor0"
+
+[[profiles.home_ultrawide.conditions.required_monitors]]
+description = "LG Electronics LG HDR WQHD+ 301NTQD30220"
+monitor_tag = "monitor1"
+
+
+[profiles.Sletvej_dual_monitor_setup]
+config_file = "$HOME/.config/hyprdynamicmonitors/hyprconfigs/Sletvej_dual_monitor_setup.go.tmpl"
+config_file_type = "template"
+[profiles.Sletvej_dual_monitor_setup.conditions]
+
+[[profiles.Sletvej_dual_monitor_setup.conditions.required_monitors]]
+description = "Dell Inc. DELL S2721QSA 6PQLZY3"
+monitor_tag = "monitor0"
+
+[[profiles.Sletvej_dual_monitor_setup.conditions.required_monitors]]
+description = "EDO EF10QBC64.C"
+monitor_tag = "monitor1"
+
+[[profiles.Sletvej_dual_monitor_setup.conditions.required_monitors]]
+description = "Dell Inc. DELL S2722QC HX62J24"
+monitor_tag = "monitor2"
+
+
+[profiles.Scout_meeting_room]
+config_file = "$HOME/.config/hyprdynamicmonitors/hyprconfigs/Scout_meeting_room.go.tmpl"
+config_file_type = "template"
+[profiles.Scout_meeting_room.conditions]
+
+[[profiles.Scout_meeting_room.conditions.required_monitors]]
+description = "EDO EF10QBC64.C"
+monitor_tag = "monitor1"
+
+[[profiles.Scout_meeting_room.conditions.required_monitors]]
+description = "LG Electronics LG TV SSCR2 0x01010101"
+monitor_tag = "monitor2"
+
+
+[profiles.Sletvej_daily_tv]
+config_file = "$HOME/.config/hyprdynamicmonitors/hyprconfigs/Sletvej_daily_tv.go.tmpl"
+config_file_type = "template"
+[profiles.Sletvej_daily_tv.conditions]
+
+[[profiles.Sletvej_daily_tv.conditions.required_monitors]]
+description = "EDO EF10QBC64.C"
+monitor_tag = "monitor1"
+
+[[profiles.Sletvej_daily_tv.conditions.required_monitors]]
+description = "Philips Consumer Electronics Company Philips UHDTV 0x01010101"
+monitor_tag = "monitor2"
+
+
+[profiles.Small_table_in_mechanics]
+config_file = "$HOME/.config/hyprdynamicmonitors/hyprconfigs/Small_table_in_mechanics.go.tmpl"
+config_file_type = "template"
+[profiles.Small_table_in_mechanics.conditions]
+
+[[profiles.Small_table_in_mechanics.conditions.required_monitors]]
+description = "ASUSTek COMPUTER INC ASUS VP28U 0x0001AF89"
+monitor_tag = "monitor0"
+
+[[profiles.Small_table_in_mechanics.conditions.required_monitors]]
+description = "EDO EF10QBC64.C"
+monitor_tag = "monitor1"
+
+
+[profiles.HQ_desk_marco_horizontal_monitors]
+config_file = "$HOME/.config/hyprdynamicmonitors/hyprconfigs/HQ_desk_marco_horizontal_monitors.go.tmpl"
+config_file_type = "template"
+[profiles.HQ_desk_marco_horizontal_monitors.conditions]
+
+[[profiles.HQ_desk_marco_horizontal_monitors.conditions.required_monitors]]
+description = "EDO EF10QBC64.C"
+monitor_tag = "monitor0"
+
+[[profiles.HQ_desk_marco_horizontal_monitors.conditions.required_monitors]]
+description = "Dell Inc. DELL S2722QC B2YYH24"
+monitor_tag = "monitor1"
+
+[[profiles.HQ_desk_marco_horizontal_monitors.conditions.required_monitors]]
+description = "Dell Inc. DELL S2722QC FBSFMD3"
+monitor_tag = "monitor2"
