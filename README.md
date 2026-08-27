@@ -26,6 +26,11 @@ The flip side is that nothing here can land directly in `$HOME`. A `.bashrc` or
 `.XCompose` would need a second package alongside `dotfiles/`, stowed with
 `-t "$HOME"`.
 
+There is also no package allowlist any more — the old script named the four
+packages explicitly, this one stows whatever is under `dotfiles/`. Adding a
+directory is all it takes to get it symlinked, and a stray directory gets
+symlinked too, so keep `dotfiles/` free of leftovers.
+
 Whether a directory arrives as one folded symlink or as file-by-file links is
 decided by whether it already exists in `~/.config` when stow runs, so
 `install-stow-packages.sh` pre-creates the ones that must stay real directories
