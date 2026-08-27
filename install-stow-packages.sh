@@ -26,7 +26,13 @@ PACKAGE_ROOT="$SCRIPT_DIR/$PACKAGE"
 # folds a directory into a single symlink when the target does not already exist,
 # and the fold is what makes profiles the hyprdynamicmonitors TUI creates land
 # inside the repo instead of loose in ~/.config.
-DIR_CLAIMS=("hyprdynamicmonitors")
+#
+# nvim is a git submodule and has to fold for the same reason and one more: the
+# fold is what keeps ~/.config/nvim a single directory with its own .git, so it
+# stays a working checkout of ToRexZ/nvim-config that can be committed from
+# either path. Linked file by file it would be a scatter of symlinks with no
+# repo, and lazy-lock.json updates would land outside git.
+DIR_CLAIMS=("hyprdynamicmonitors" "nvim")
 
 # The inverse: paths that must stay real directories so stow links their
 # contents file by file. herdr keeps its sockets, logs and session.json beside
@@ -43,6 +49,17 @@ if ! command -v stow >/dev/null 2>&1; then
 fi
 
 [[ -d "$PACKAGE_ROOT" ]] || { echo "no such package: $PACKAGE_ROOT" >&2; exit 1; }
+
+# An uninitialised submodule is an empty directory, and stow would happily fold
+# ~/.config/nvim onto it -- leaving a working nvim with no config and no hint as
+# to why. Catch it here instead.
+if [[ -f "$SCRIPT_DIR/.gitmodules" ]]; then
+  while IFS= read -r sub; do
+    [[ -n "$(ls -A "$SCRIPT_DIR/$sub" 2>/dev/null)" ]] && continue
+    echo "submodule $sub is empty -- run: git submodule update --init --recursive" >&2
+    exit 1
+  done < <(git -C "$SCRIPT_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}')
+fi
 
 # A pre-existing file blocks stow. Anything that is not already a link into this
 # repo gets moved aside with a timestamp rather than deleted.
@@ -81,7 +98,7 @@ while IFS= read -r -d '' file; do
   rel="${file#"$PACKAGE_ROOT"/}"
   is_claimed_dir "$rel" && continue
   displace "$TARGET/$rel"
-done < <(find "$PACKAGE_ROOT" -type f -print0)
+done < <(find "$PACKAGE_ROOT" -name .git -prune -o -type f -print0)
 
 for dir in "${UNFOLDED_DIRS[@]}"; do
   mkdir -p "$TARGET/$dir"
