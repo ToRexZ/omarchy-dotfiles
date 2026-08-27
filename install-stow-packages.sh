@@ -14,13 +14,20 @@ DOTFILES="$SCRIPT_DIR/dotfiles"
 TARGET="$HOME"
 TS="$(date +%Y%m%d%H%M%S)"
 
-PACKAGES=(hypr hyprdynamicmonitors opencode)
+PACKAGES=(hypr hyprdynamicmonitors opencode herdr)
 
 # Paths this repo claims as a whole directory rather than file by file. stow only
 # folds a directory into a single symlink when the target does not already exist,
 # and the fold is what makes profiles the hyprdynamicmonitors TUI creates land
 # inside the repo instead of loose in ~/.config.
 DIR_CLAIMS=(".config/hyprdynamicmonitors")
+
+# The inverse: paths that must stay real directories so stow links their
+# contents file by file. herdr keeps its sockets, logs and session.json beside
+# config.toml, so a folded .config/herdr would write that runtime state into
+# the repo -- and folding is exactly what stow does on a machine that has no
+# ~/.config/herdr yet, which is every fresh install.
+UNFOLDED_DIRS=(".config/herdr")
 
 if ! command -v stow >/dev/null 2>&1; then
   echo "stow is not installed -- run ./install-packages.sh first" >&2
@@ -69,6 +76,10 @@ for package in "${PACKAGES[@]}"; do
     is_claimed_dir "$rel" && continue
     displace "$TARGET/$rel"
   done < <(find "$package_root" -type f -print0)
+done
+
+for dir in "${UNFOLDED_DIRS[@]}"; do
+  mkdir -p "$TARGET/$dir"
 done
 
 echo "==> Stowing: ${PACKAGES[*]}"

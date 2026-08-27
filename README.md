@@ -10,6 +10,7 @@ into `$HOME` with [stow](https://www.gnu.org/software/stow/).
 | `hypr`              | `~/.config/hypr/`              | `bindings.lua`, `monitors.lua`, `autostart.lua` |
 | `hyprdynamicmonitors` | `~/.config/hyprdynamicmonitors` (whole dir) | monitor profiles, one per physical location |
 | `opencode`          | `~/.config/opencode/`          | `opencode.json` |
+| `herdr`             | `~/.config/herdr/config.toml`  | terminal workspace manager keymap |
 
 Omarchy drives Hyprland through Lua: `~/.config/hypr/hyprland.lua` loads
 Omarchy's defaults and then `require`s `hypr.bindings`, `hypr.monitors`,
@@ -62,6 +63,39 @@ over `monitors.conf`.
 ```sh
 systemctl --user status hyprdynamicmonitors
 journalctl --user -u hyprdynamicmonitors -f
+```
+
+## herdr
+
+`config.toml` mirrors the old tmux config: prefix is `ctrl+space`, a tmux session
+is a herdr workspace, a window a tab, a pane a pane. Only `config.toml` is
+symlinked — herdr keeps its sockets, logs and `session.json` in the same
+directory, and those are per-machine.
+
+herdr is built from `packages/herdr` instead of installed from the AUR, because
+its keybinds panel (`prefix+?`) is unreadable with this keymap. The panel sizes
+its shortcut column to the longest binding in the list, and `resize_mode` here is
+a four-key alias list that renders 72 columns wide — wider than the 76-column
+panel, so every description wrapped onto a row of its own at column zero, flush
+left, under an indented heading.
+
+`packages/herdr/keybind-help-readability.patch` caps that column at 40% of the
+panel, gives an over-wide binding a row to itself with the description hanging in
+the description column, indents entries under their group heading, puts a blank
+row between entries, and widens the panel to 100x34. herdr exposes no config for
+any of this, so it has to be a source patch.
+
+The package is named `herdr-patched` and `conflicts` with `herdr` so `yay -Syu`
+cannot quietly swap the patched build back out. **`herdr update` still can** — it
+replaces `/usr/bin/herdr` in place — so re-run `install-scripts/herdr.sh` after
+using it.
+
+To take a new upstream release: bump `pkgver` in `packages/herdr/PKGBUILD`,
+refresh the checksum with `updpkgsums`, and rebuild. If the patch stops applying,
+upstream has reworked `src/ui/keybind_help.rs` and the change needs redoing.
+
+```sh
+cd packages/herdr && makepkg -si    # rebuild and install
 ```
 
 ## New machine

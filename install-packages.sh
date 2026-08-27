@@ -6,3 +6,4 @@
 . ./install-scripts/nmap.sh
 . ./install-scripts/hyprdynamicmonitors.sh
 . ./install-scripts/opencode.sh
+. ./install-scripts/herdr.sh
