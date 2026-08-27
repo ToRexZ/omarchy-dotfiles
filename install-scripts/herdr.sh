@@ -16,10 +16,18 @@
 # The package is named herdr-patched and conflicts with herdr so `yay -Syu`
 # cannot quietly swap the patched build back out. `herdr update` still can --
 # it replaces /usr/bin/herdr in place -- so re-run this script after using it.
+
+# The PKGBUILD is found relative to the repo root, which is where
+# install-packages.sh sources this from. Check before installing anything.
+if [ ! -f packages/herdr/PKGBUILD ]; then
+  echo "install-scripts/herdr.sh: run this from the repo root" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 yay -S --noconfirm --needed zig0.15-bin rust
 
-# Sourced from install-packages.sh, so keep the cd and any failure inside a
-# subshell instead of leaking them into the caller's shell.
+# This script gets sourced, so keep the cd inside a subshell rather than
+# leaving the caller's shell somewhere else.
 (
   cd packages/herdr || exit 1
   makepkg -si --noconfirm --needed
