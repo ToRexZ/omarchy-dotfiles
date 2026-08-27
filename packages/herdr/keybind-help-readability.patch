@@ -1,0 +1,349 @@
+diff --git i/src/app/input/overlays.rs w/src/app/input/overlays.rs
+index 58f2ef7..ba1f589 100644
+--- i/src/app/input/overlays.rs
++++ w/src/app/input/overlays.rs
+@@ -610,11 +610,19 @@ impl AppState {
+     }
+ 
+     pub(super) fn keybind_help_popup_rect(&self) -> Rect {
+-        crate::ui::centered_popup_rect(self.screen_rect(), 76, 22).unwrap_or_default()
++        crate::ui::centered_popup_rect(
++            self.screen_rect(),
++            crate::ui::KEYBIND_HELP_POPUP_W,
++            crate::ui::KEYBIND_HELP_POPUP_H,
++        )
++        .unwrap_or_default()
+     }
+ 
+     fn keybind_help_modal_inner(&self) -> Option<Rect> {
+-        self.onboarding_modal_inner(76, 22)
++        self.onboarding_modal_inner(
++            crate::ui::KEYBIND_HELP_POPUP_W,
++            crate::ui::KEYBIND_HELP_POPUP_H,
++        )
+     }
+ 
+     fn keybind_help_close_button_at(&self, col: u16, row: u16) -> bool {
+@@ -644,7 +652,7 @@ impl AppState {
+         let body = self.keybind_help_body_rect()?;
+         let viewport_rows = body.height.max(1) as usize;
+         let wrap_width = body.width.max(1) as usize;
+-        let total_rows = crate::ui::keybind_help_lines(self)
++        let total_rows = crate::ui::keybind_help_lines(self, wrap_width)
+             .into_iter()
+             .map(|(width, _)| width.max(1).div_ceil(wrap_width))
+             .sum::<usize>();
+diff --git i/src/ui.rs w/src/ui.rs
+index 8adc31e..5da9332 100644
+--- i/src/ui.rs
++++ w/src/ui.rs
+@@ -89,7 +89,7 @@ pub(crate) use self::{
+ };
+ 
+ pub(crate) use self::{
+-    keybind_help::keybind_help_lines,
++    keybind_help::{keybind_help_lines, KEYBIND_HELP_POPUP_H, KEYBIND_HELP_POPUP_W},
+     mobile::{
+         mobile_switcher_areas, mobile_switcher_max_scroll, mobile_switcher_target_at,
+         mobile_switcher_workspace_doc_range, MobileSwitcherTarget,
+@@ -1514,7 +1514,7 @@ mod tests {
+             .iter()
+             .any(|(key, label)| key == "prefix+alt+h" && label.as_ref() == "custom command"));
+ 
+-        let rendered_help = keybind_help_lines(&app)
++        let rendered_help = keybind_help_lines(&app, 96)
+             .into_iter()
+             .flat_map(|(_, line)| line.spans)
+             .map(|span| span.content.into_owned())
+diff --git i/src/ui/keybind_help.rs w/src/ui/keybind_help.rs
+index 1f01c60..bf98bbb 100644
+--- i/src/ui/keybind_help.rs
++++ w/src/ui/keybind_help.rs
+@@ -19,6 +19,26 @@ use crate::app::AppState;
+ pub(super) type HelpEntry = (String, Cow<'static, str>);
+ pub(super) type HelpGroup = (&'static str, Vec<HelpEntry>);
+ 
++/// Requested size of the keybinds overlay. `centered_popup_rect` clamps these
++/// down on small terminals, so they are upper bounds rather than fixed sizes.
++pub(crate) const KEYBIND_HELP_POPUP_W: u16 = 100;
++pub(crate) const KEYBIND_HELP_POPUP_H: u16 = 34;
++
++/// Blank rows between consecutive entries. Set to 0 for a dense list.
++const ENTRY_SPACING: usize = 1;
++/// Column a group heading starts at.
++const HEADING_INDENT: usize = 1;
++/// Column entries start at, one step in from their heading.
++const ENTRY_INDENT: usize = 3;
++/// Blank columns between the shortcut column and the description column.
++const KEY_LABEL_GAP: usize = 2;
++/// Descriptions are never squeezed below this, which is what bounds the
++/// shortcut column on narrow panels.
++const MIN_LABEL_WIDTH: usize = 26;
++/// Share of the panel the shortcut column may occupy before a binding counts
++/// as an outlier and gets a row of its own.
++const KEY_COLUMN_SHARE: usize = 40;
++
+ fn help_entry(key: impl Into<String>, label: &'static str) -> HelpEntry {
+     (key.into(), Cow::Borrowed(label))
+ }
+@@ -207,7 +227,32 @@ fn filter_keybind_help_groups(groups: Vec<HelpGroup>, query: &str) -> Vec<HelpGr
+         .collect()
+ }
+ 
+-pub(crate) fn keybind_help_lines(app: &AppState) -> Vec<(usize, Line<'static>)> {
++fn push_blank(lines: &mut Vec<(usize, Line<'static>)>, count: usize) {
++    for _ in 0..count {
++        lines.push((0, Line::raw("")));
++    }
++}
++
++/// Width of the shortcut column.
++///
++/// The column hugs the longest binding that still fits the cap; anything wider
++/// is an outlier and gets a row of its own. Sizing the column to the longest
++/// binding outright let a single wide binding stretch it past the edge of the
++/// panel, which pushed every description onto a wrapped, unindented row.
++fn key_column_width(groups: &[HelpGroup], wrap_width: usize) -> usize {
++    let floor = ENTRY_INDENT + KEY_LABEL_GAP + MIN_LABEL_WIDTH + 4;
++    let wrap_width = wrap_width.max(floor);
++    let budget = wrap_width.saturating_sub(ENTRY_INDENT + KEY_LABEL_GAP + MIN_LABEL_WIDTH);
++    let cap = budget.min(wrap_width * KEY_COLUMN_SHARE / 100).max(4);
++    groups
++        .iter()
++        .flat_map(|(_, entries)| entries.iter().map(|(key, _)| key.chars().count()))
++        .filter(|len| *len <= cap)
++        .max()
++        .unwrap_or(cap)
++}
++
++pub(crate) fn keybind_help_lines(app: &AppState, wrap_width: usize) -> Vec<(usize, Line<'static>)> {
+     let heading_style = Style::default()
+         .fg(app.palette.accent)
+         .add_modifier(Modifier::BOLD);
+@@ -217,13 +262,6 @@ pub(crate) fn keybind_help_lines(app: &AppState) -> Vec<(usize, Line<'static>)>
+     let label_style = Style::default().fg(app.palette.text);
+ 
+     let groups = filter_keybind_help_groups(keybind_help_groups(app), &app.keybind_help.query);
+-    let key_width = groups
+-        .iter()
+-        .flat_map(|(_, entries)| entries.iter().map(|(key, _)| key.chars().count()))
+-        .max()
+-        .unwrap_or(8);
+-
+-    let mut lines = Vec::new();
+ 
+     if groups.is_empty() {
+         let message = " no matching keybinds";
+@@ -236,23 +274,59 @@ pub(crate) fn keybind_help_lines(app: &AppState) -> Vec<(usize, Line<'static>)>
+         )];
+     }
+ 
+-    for (group, entries) in groups {
++    let key_width = key_column_width(&groups, wrap_width);
++    let label_indent = ENTRY_INDENT + key_width + KEY_LABEL_GAP;
++
++    let mut lines = Vec::new();
++
++    for (group_index, (group, entries)) in groups.into_iter().enumerate() {
++        if group_index > 0 {
++            push_blank(&mut lines, ENTRY_SPACING + 1);
++        }
++
++        let heading = format!("{}{group}", " ".repeat(HEADING_INDENT));
+         lines.push((
+-            group.len() + 1,
+-            Line::from(vec![Span::styled(format!(" {group}"), heading_style)]),
++            heading.chars().count(),
++            Line::from(Span::styled(heading, heading_style)),
+         ));
+-        for (key, label) in entries {
+-            let padded_key = format!(" {:<width$} ", key, width = key_width);
+-            let width = padded_key.chars().count() + label.chars().count();
+-            lines.push((
+-                width,
+-                Line::from(vec![
+-                    Span::styled(padded_key, key_style),
+-                    Span::styled(label.into_owned(), label_style),
+-                ]),
+-            ));
++        push_blank(&mut lines, ENTRY_SPACING);
++
++        for (entry_index, (key, label)) in entries.into_iter().enumerate() {
++            if entry_index > 0 {
++                push_blank(&mut lines, ENTRY_SPACING);
++            }
++            let label = label.into_owned();
++
++            if key.chars().count() <= key_width {
++                let key_cell = format!(
++                    "{}{key:<key_width$}{}",
++                    " ".repeat(ENTRY_INDENT),
++                    " ".repeat(KEY_LABEL_GAP),
++                );
++                let width = key_cell.chars().count() + label.chars().count();
++                lines.push((
++                    width,
++                    Line::from(vec![
++                        Span::styled(key_cell, key_style),
++                        Span::styled(label, label_style),
++                    ]),
++                ));
++            } else {
++                // Outlier binding: it owns a row, then the description hangs
++                // under the description column rather than being wrapped back
++                // to column zero.
++                let key_row = format!("{}{key}", " ".repeat(ENTRY_INDENT));
++                lines.push((
++                    key_row.chars().count(),
++                    Line::from(Span::styled(key_row, key_style)),
++                ));
++                let label_row = format!("{}{label}", " ".repeat(label_indent));
++                lines.push((
++                    label_row.chars().count(),
++                    Line::from(Span::styled(label_row, label_style)),
++                ));
++            }
+         }
+-        lines.push((0, Line::raw("")));
+     }
+ 
+     lines
+@@ -261,7 +335,13 @@ pub(crate) fn keybind_help_lines(app: &AppState) -> Vec<(usize, Line<'static>)>
+ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
+     super::dim_background(frame, frame.area());
+ 
+-    let Some(inner) = render_modal_shell(frame, frame.area(), 76, 22, &app.palette) else {
++    let Some(inner) = render_modal_shell(
++        frame,
++        frame.area(),
++        KEYBIND_HELP_POPUP_W,
++        KEYBIND_HELP_POPUP_H,
++        &app.palette,
++    ) else {
+         return;
+     };
+     if inner.height < 6 || inner.width < 20 {
+@@ -331,7 +411,7 @@ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
+         .unwrap_or(body_area);
+ 
+     let body = Paragraph::new(
+-        keybind_help_lines(app)
++        keybind_help_lines(app, text_area.width as usize)
+             .into_iter()
+             .map(|(_, line)| line)
+             .collect::<Vec<_>>(),
+@@ -423,4 +503,114 @@ mod tests {
+ 
+         assert!(filter_keybind_help_groups(groups(), "panes").is_empty());
+     }
++
++    fn app_with_keys(keys: &str) -> crate::app::state::AppState {
++        let config: crate::config::Config = toml::from_str(keys).expect("config parses");
++        let mut app = crate::app::state::AppState::test_new();
++        app.keybinds = config.keybinds();
++        app
++    }
++
++    fn rendered_rows(app: &crate::app::state::AppState, wrap_width: usize) -> Vec<String> {
++        keybind_help_lines(app, wrap_width)
++            .into_iter()
++            .map(|(_, line)| {
++                line.spans
++                    .iter()
++                    .map(|span| span.content.as_ref())
++                    .collect::<String>()
++            })
++            .collect()
++    }
++
++    /// The alias list below renders as a 72-column shortcut. It used to set the
++    /// width of the shortcut column for every row, overflowing the panel, so
++    /// ratatui wrapped every description onto a row of its own at column zero -
++    /// flush left, under a heading that was indented.
++    #[test]
++    fn wide_binding_does_not_unindent_every_description() {
++        let app = app_with_keys(
++            r#"
++[keys]
++split_vertical = "prefix+v"
++resize_mode = ["prefix+ctrl+left", "prefix+ctrl+down", "prefix+ctrl+up", "prefix+ctrl+right"]
++"#,
++        );
++
++        let wrap_width = 96;
++        let rows = rendered_rows(&app, wrap_width);
++
++        for row in &rows {
++            assert!(
++                row.chars().count() <= wrap_width,
++                "row overflows the panel and wraps back to column zero: {row:?}"
++            );
++            assert!(
++                row.is_empty() || row.starts_with(' '),
++                "row sits flush against the border: {row:?}"
++            );
++        }
++
++        // A shortcut that fits the column shares its row with its description.
++        assert!(
++            rows.iter()
++                .any(|row| row.contains("split vertical") && row.contains("prefix+v")),
++            "expected shortcut and description on one row, got: {rows:#?}"
++        );
++
++        // The outlier keeps a row to itself and its description hangs in the
++        // description column rather than being pushed flush left.
++        let resize = rows
++            .iter()
++            .find(|row| row.trim() == "resize mode")
++            .expect("resize mode description on its own row");
++        let indent = resize.len() - resize.trim_start().len();
++        assert!(
++            indent > ENTRY_INDENT,
++            "description is not hung under the description column: {resize:?}"
++        );
++    }
++
++    #[test]
++    fn entries_are_separated_by_blank_rows() {
++        let app = app_with_keys(
++            "[keys]\nsplit_vertical = \"prefix+v\"\nsplit_horizontal = \"prefix+h\"\n",
++        );
++        let rows = rendered_rows(&app, 96);
++
++        let first = rows
++            .iter()
++            .position(|row| row.contains("split vertical"))
++            .expect("split vertical row");
++        let second = rows
++            .iter()
++            .position(|row| row.contains("split horizontal"))
++            .expect("split horizontal row");
++
++        assert!(second > first, "entries out of order: {rows:#?}");
++        assert!(
++            rows[first + 1..second]
++                .iter()
++                .any(|row| row.trim().is_empty()),
++            "no blank row between consecutive entries: {:#?}",
++            &rows[first..=second]
++        );
++    }
++
++    #[test]
++    fn key_column_hugs_the_widest_binding_that_fits() {
++        let groups = vec![(
++            "panes",
++            vec![
++                help_entry("prefix+v", "split vertical"),
++                help_entry("prefix+shift+o", "rename pane"),
++                help_entry("x".repeat(80), "outlier"),
++            ],
++        )];
++
++        assert_eq!(
++            key_column_width(&groups, 96),
++            "prefix+shift+o".chars().count()
++        );
++    }
+ }
