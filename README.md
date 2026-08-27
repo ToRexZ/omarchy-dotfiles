@@ -1,16 +1,36 @@
 # omarchy-dotfiles
 
 Personal config for [Omarchy](https://omarchy.org/) (Arch + Hyprland), symlinked
-into `$HOME` with [stow](https://www.gnu.org/software/stow/).
+into `~/.config` with [stow](https://www.gnu.org/software/stow/).
 
 ## Layout
 
-| Package             | Links into                     | Contents |
-|---------------------|--------------------------------|----------|
-| `hypr`              | `~/.config/hypr/`              | `bindings.lua`, `monitors.lua`, `autostart.lua` |
-| `hyprdynamicmonitors` | `~/.config/hyprdynamicmonitors` (whole dir) | monitor profiles, one per physical location |
-| `opencode`          | `~/.config/opencode/`          | `opencode.json` |
-| `herdr`             | `~/.config/herdr/config.toml`  | terminal workspace manager keymap |
+`dotfiles/` is one stow package, stowed into `~/.config` rather than `$HOME`:
+
+```
+stow --restow -d <repo> -t "$HOME/.config" dotfiles
+```
+
+stow links the *contents* of a package into the target, so each directory under
+`dotfiles/` becomes the matching directory under `~/.config` and the repo does
+not carry a `.config` level of its own:
+
+| In the repo                     | Links into                     | Contents |
+|---------------------------------|--------------------------------|----------|
+| `dotfiles/hypr/`                | `~/.config/hypr/`              | `bindings.lua`, `monitors.lua`, `autostart.lua` |
+| `dotfiles/hyprdynamicmonitors/` | `~/.config/hyprdynamicmonitors` (whole dir) | monitor profiles, one per physical location |
+| `dotfiles/opencode/`            | `~/.config/opencode/`          | `opencode.json` |
+| `dotfiles/herdr/`               | `~/.config/herdr/config.toml`  | terminal workspace manager keymap |
+
+The flip side is that nothing here can land directly in `$HOME`. A `.bashrc` or
+`.XCompose` would need a second package alongside `dotfiles/`, stowed with
+`-t "$HOME"`.
+
+Whether a directory arrives as one folded symlink or as file-by-file links is
+decided by whether it already exists in `~/.config` when stow runs, so
+`install-stow-packages.sh` pre-creates the ones that must stay real directories
+(`hypr`, `herdr`, `opencode`) and clears the one that must fold
+(`hyprdynamicmonitors`).
 
 Omarchy drives Hyprland through Lua: `~/.config/hypr/hyprland.lua` loads
 Omarchy's defaults and then `require`s `hypr.bindings`, `hypr.monitors`,
@@ -107,7 +127,7 @@ cd ~/omarchy_configuration/omarchy-dotfiles
 ```
 
 `setup-all.sh` installs the packages (`install-packages.sh`) and then symlinks
-config into `$HOME` (`install-stow-packages.sh`). Conflicting real files are
+config into `~/.config` (`install-stow-packages.sh`). Conflicting real files are
 moved aside as `<name>.pre-stow.<timestamp>.bak` rather than deleted.
 
 Verify afterwards:

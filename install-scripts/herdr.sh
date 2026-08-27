@@ -2,7 +2,7 @@
 
 # Terminal workspace manager. Built from packages/herdr rather than pulled from
 # the AUR, because the stock keybinds panel (prefix+?) is unreadable with the
-# keymap in dotfiles/herdr/.config/herdr/config.toml.
+# keymap in dotfiles/herdr/config.toml.
 #
 # The panel sizes its shortcut column to the longest binding in the list. Our
 # resize_mode is a four-key alias list that renders 72 columns wide, which
