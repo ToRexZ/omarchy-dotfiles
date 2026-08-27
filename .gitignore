@@ -1,0 +1,3 @@
+# Claude Code session state and its git worktrees. The worktrees are real git
+# repositories, so `git add -A` will otherwise try to embed them.
+.claude/
