@@ -21,6 +21,7 @@ not carry a `.config` level of its own:
 | `dotfiles/hyprdynamicmonitors/` | `~/.config/hyprdynamicmonitors` (whole dir) | monitor profiles, one per physical location |
 | `dotfiles/opencode/`            | `~/.config/opencode/`          | `opencode.json` |
 | `dotfiles/herdr/`               | `~/.config/herdr/config.toml`  | terminal workspace manager keymap |
+| `dotfiles/nvim/`                | `~/.config/nvim` (whole dir)   | git submodule, [ToRexZ/nvim-config](https://github.com/ToRexZ/nvim-config) |
 
 The flip side is that nothing here can land directly in `$HOME`. A `.bashrc` or
 `.XCompose` would need a second package alongside `dotfiles/`, stowed with
@@ -90,6 +91,35 @@ systemctl --user status hyprdynamicmonitors
 journalctl --user -u hyprdynamicmonitors -f
 ```
 
+## nvim
+
+`dotfiles/nvim` is a **git submodule**, not ordinary files — the config keeps its
+own history in [ToRexZ/nvim-config](https://github.com/ToRexZ/nvim-config) and is
+merely referenced from here. `~/.config/nvim` is a single folded stow symlink
+into it, so the directory nvim reads is the submodule checkout itself: edits made
+from either path are the same file, `lazy-lock.json` updates land in git, and
+`cd ~/.config/nvim && git status` works exactly as it did before.
+
+The superproject records a **commit pointer**, not the working tree. Committing
+in the submodule is therefore only half of it — the pointer has to be moved too,
+or a fresh machine gets whatever commit is recorded here:
+
+```sh
+cd dotfiles/nvim
+git add -A && git commit -m "..." && git push     # 1. the config's own history
+cd ../..
+git add dotfiles/nvim && git commit -m "Bump nvim" # 2. the pointer in this repo
+```
+
+`git status` in this repo shows `modified: dotfiles/nvim (new commits)` whenever
+the two have drifted apart. To pull someone else's bump: `git submodule update
+--init --recursive`, which `setup-all.sh` runs for you.
+
+A plain `git clone` of this repo leaves `dotfiles/nvim` **empty** — submodules
+are not fetched by default. Clone with `--recurse-submodules`, or let
+`setup-all.sh` do it. `install-stow-packages.sh` refuses to run against an empty
+submodule rather than folding `~/.config/nvim` onto nothing.
+
 ## herdr
 
 `config.toml` mirrors the old tmux config: prefix is `ctrl+space`, a tmux session
@@ -126,7 +156,7 @@ cd packages/herdr && makepkg -si    # rebuild and install
 ## New machine
 
 ```sh
-git clone git@github.com:ToRexZ/omarchy-dotfiles.git ~/omarchy_configuration/omarchy-dotfiles
+git clone --recurse-submodules git@github.com:ToRexZ/omarchy-dotfiles.git ~/omarchy_configuration/omarchy-dotfiles
 cd ~/omarchy_configuration/omarchy-dotfiles
 ./setup-all.sh
 ```
