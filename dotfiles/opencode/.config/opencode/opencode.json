@@ -6,8 +6,8 @@
   ],
   "provider": {
     "cursor-acp": {
-      "npm": "@ai-sdk/openai-compatible",
       "name": "Cursor ACP",
+      "npm": "@ai-sdk/openai-compatible",
       "options": {
         "baseURL": "http://127.0.0.1:32124/v1"
       },
@@ -15,23 +15,35 @@
         "cursor-acp/auto": {
           "name": "Auto"
         },
+        "cursor-acp/composer-2-fast": {
+          "name": "Composer 2 Fast"
+        },
+        "cursor-acp/composer-2": {
+          "name": "Composer 2"
+        },
+        "cursor-acp/gpt-5.4-medium-fast": {
+          "name": "GPT-5.4 Fast"
+        },
+        "cursor-acp/gpt-5.4-medium": {
+          "name": "GPT-5.4"
+        },
+        "cursor-acp/gpt-5.4-high-fast": {
+          "name": "GPT-5.4 High Fast"
+        },
+        "cursor-acp/gemini-3-pro": {
+          "name": "Gemini 3 Pro"
+        },
         "cursor-acp/sonnet-4.5": {
           "name": "Claude Sonnet 4.5"
         },
         "cursor-acp/sonnet-4.5-thinking": {
           "name": "Claude Sonnet 4.5 Thinking"
         },
-        "cursor-acp/gpt-5.2": {
-          "name": "GPT-5.2"
-        },
-        "cursor-acp/gpt-5.2-codex": {
-          "name": "GPT-5.2 Codex"
-        },
         "auto": {
           "name": "Auto"
         },
         "composer-2-fast": {
-          "name": "Composer 2 Fast  (current, default)"
+          "name": "Composer 2 Fast"
         },
         "composer-2": {
           "name": "Composer 2"
@@ -126,6 +138,9 @@
         "gpt-5.1-codex-max-xhigh-fast": {
           "name": "Codex 5.1 Max Extra High Fast"
         },
+        "claude-opus-4-7-thinking-high": {
+          "name": "Opus 4.7 1M Thinking"
+        },
         "gpt-5.4-high": {
           "name": "GPT-5.4 1M High"
         },
@@ -135,8 +150,32 @@
         "gpt-5.4-xhigh-fast": {
           "name": "GPT-5.4 Extra High Fast"
         },
-        "claude-4.6-opus-high-thinking": {
-          "name": "Opus 4.6 1M Thinking"
+        "claude-opus-4-7-low": {
+          "name": "Opus 4.7 1M Low"
+        },
+        "claude-opus-4-7-medium": {
+          "name": "Opus 4.7 1M Medium"
+        },
+        "claude-opus-4-7-high": {
+          "name": "Opus 4.7 1M"
+        },
+        "claude-opus-4-7-xhigh": {
+          "name": "Opus 4.7 1M Extra High"
+        },
+        "claude-opus-4-7-max": {
+          "name": "Opus 4.7 1M Max"
+        },
+        "claude-opus-4-7-thinking-low": {
+          "name": "Opus 4.7 1M Low Thinking"
+        },
+        "claude-opus-4-7-thinking-medium": {
+          "name": "Opus 4.7 1M Medium Thinking"
+        },
+        "claude-opus-4-7-thinking-xhigh": {
+          "name": "Opus 4.7 1M Extra High Thinking"
+        },
+        "claude-opus-4-7-thinking-max": {
+          "name": "Opus 4.7 1M Max Thinking"
         },
         "gpt-5.4-low": {
           "name": "GPT-5.4 1M Low"
@@ -161,6 +200,9 @@
         },
         "claude-4.6-opus-max": {
           "name": "Opus 4.6 1M Max"
+        },
+        "claude-4.6-opus-high-thinking": {
+          "name": "Opus 4.6 1M Thinking"
         },
         "claude-4.6-opus-max-thinking": {
           "name": "Opus 4.6 1M Max Thinking"
@@ -275,6 +317,87 @@
         },
         "kimi-k2.5": {
           "name": "Kimi K2.5"
+        },
+        "claude-4.6-opus-high-thinking-fast": {
+          "name": "Opus 4.6 1M Thinking Fast"
+        },
+        "claude-4.6-opus-max-thinking-fast": {
+          "name": "Opus 4.6 1M Max Thinking Fast"
+        },
+        "gpt-5.5-medium": {
+          "name": "GPT-5.5 1M"
+        },
+        "gpt-5.5-high": {
+          "name": "GPT-5.5 1M High"
+        },
+        "gpt-5.5-extra-high": {
+          "name": "GPT-5.5 1M Extra High"
+        },
+        "gpt-5.5-high-fast": {
+          "name": "GPT-5.5 High Fast"
+        },
+        "gpt-5.5-none": {
+          "name": "GPT-5.5 1M None"
+        },
+        "gpt-5.5-none-fast": {
+          "name": "GPT-5.5 None Fast"
+        },
+        "gpt-5.5-low": {
+          "name": "GPT-5.5 1M Low"
+        },
+        "gpt-5.5-low-fast": {
+          "name": "GPT-5.5 Low Fast"
+        },
+        "gpt-5.5-medium-fast": {
+          "name": "GPT-5.5 Fast"
+        },
+        "gpt-5.5-extra-high-fast": {
+          "name": "GPT-5.5 Extra High Fast"
+        },
+        "grok-4.3": {
+          "name": "Grok 4.3 1M"
+        },
+        "claude-opus-4-7-low-fast": {
+          "name": "Opus 4.7 1M Low Fast"
+        },
+        "claude-opus-4-7-medium-fast": {
+          "name": "Opus 4.7 1M Medium Fast"
+        },
+        "claude-opus-4-7-high-fast": {
+          "name": "Opus 4.7 1M High Fast"
+        },
+        "claude-opus-4-7-xhigh-fast": {
+          "name": "Opus 4.7 1M Fast"
+        },
+        "claude-opus-4-7-max-fast": {
+          "name": "Opus 4.7 1M Max Fast"
+        },
+        "claude-opus-4-7-thinking-low-fast": {
+          "name": "Opus 4.7 1M Low Thinking Fast"
+        },
+        "claude-opus-4-7-thinking-medium-fast": {
+          "name": "Opus 4.7 1M Medium Thinking Fast"
+        },
+        "claude-opus-4-7-thinking-high-fast": {
+          "name": "Opus 4.7 1M High Thinking Fast"
+        },
+        "claude-opus-4-7-thinking-xhigh-fast": {
+          "name": "Opus 4.7 1M Thinking Fast"
+        },
+        "claude-opus-4-7-thinking-max-fast": {
+          "name": "Opus 4.7 1M Max Thinking Fast"
+        },
+        "composer-2.5": {
+          "name": "Composer 2.5"
+        },
+        "composer-2.5-fast": {
+          "name": "Composer 2.5 Fast"
+        },
+        "gemini-3.5-flash": {
+          "name": "Gemini 3.5 Flash"
+        },
+        "grok-build-0.1": {
+          "name": "Grok Build 0.1 1M"
         }
       }
     }
