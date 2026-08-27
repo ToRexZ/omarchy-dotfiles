@@ -225,6 +225,41 @@ Two flags: `--groups <list>` selects which package groups to install, and
 of them. `--dry-run` is what makes the plan reviewable before it touches a fresh
 machine, so it must cover all ten steps, not just the package install.
 
+## Reentrancy
+
+Every script is safe to run any number of times, in any order, on a machine in
+any state — fresh, half-configured, or complete. A second run changes nothing
+and does not fail.
+
+This matters more than it sounds. A fresh machine will not get through
+`setup-all.sh` cleanly on the first attempt: the nvim clone needs an SSH key
+that `setup-github.sh` has not created yet, a package mirror will be flaky, or
+a plugin repo will have moved. The recovery has to be "fix it and run the whole
+thing again", not "work out which of the ten steps already happened".
+
+The rules:
+
+- Guard before acting — check `pacman -Q`, `[[ -d ]]`, `[[ -L ]]` and skip
+  rather than redo.
+- Prefer natively reentrant commands: `yay -S --needed`, `stow --restow`,
+  `ln -sf`, `systemctl enable --now`, `mkdir -p`.
+- Never append to a tracked file without checking the entry is absent.
+- A step that cannot be made reentrant detects the done state and returns early
+  with a log line, not an error.
+- A failure that is recoverable by hand — a clone with no SSH key — warns and
+  continues, so one broken step does not block the other nine.
+
+Three things need explicit guards rather than getting this for free: the
+`--write` path of `sync-packages.sh`, which appends; `omarchy plugin add` and
+`omarchy theme install`, which are not documented as no-ops on an
+already-installed item; and the herdr rebuild, which is a ten-minute
+from-source build that must be skipped when the installed version already
+matches the PKGBUILD.
+
+Reentrancy is verified by a test suite that runs the sync scripts and stow twice
+and asserts nothing moved, plus static checks against the two bugs that are easy
+to reintroduce.
+
 ## Out of scope
 
 Not tracked, and step 10 prints them as manual follow-ups:
