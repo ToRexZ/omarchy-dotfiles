@@ -27,7 +27,11 @@ source=("${_upstream}-${pkgver}.tar.gz::https://github.com/ogulcancelik/${_upstr
 # The patch is versioned in this repo, so git is what guards its integrity.
 sha256sums=('60453051025ee44ebf055d26cdaf665a0accd99a992cddd22c166a26c49cd161'
             'SKIP')
-_zig=/opt/zig0.15/zig
+# Where zig0.15-bin puts its compiler. HERDR_ZIG overrides it, so the package
+# can also be built against a zig 0.15 that is not installed system-wide -- pair
+# it with `makepkg -d`, since makedepends is still checked:
+#   HERDR_ZIG=/path/to/zig makepkg -d
+_zig="${HERDR_ZIG:-/opt/zig0.15/zig}"
 
 prepare() {
   cd "${_upstream}-${pkgver}"
