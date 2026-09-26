@@ -78,9 +78,12 @@ next_workspace = ["prefix+shift+n", "alt+down"]
 
 # Agents. herdr ships these unset. Agents cut across tabs and workspaces, so
 # rather than a third p/n tier they get their own keys.
-previous_agent = "prefix+,"
-next_agent = "prefix+."
+previous_agent = "prefix+."
+next_agent = "prefix+,"
 focus_agent = "prefix+shift+1..9"
+# Jump to the pane that raised the last notification. herdr ships this
+# unset; it is the keyboard twin of clicking the toast.
+open_notification_target = "prefix+g"
 
 # tmux swapped panes with `bind { swap-pane -U` / `bind } swap-pane -D`, which
 # walked pane index order and offered no left/right. herdr's swaps are spatial
@@ -128,4 +131,4 @@ status_indicators = "symbols"
 
 show_agent_labels_on_pane_borders = true
 [ui.toast]
-delivery = "system"
+delivery = "off"

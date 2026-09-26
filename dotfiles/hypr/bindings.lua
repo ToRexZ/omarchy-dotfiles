@@ -66,7 +66,17 @@ o.bind(
   "Work emulator",
   os.getenv("HOME") .. "/omarchy_configuration/emulator/work_emulator_launch.sh"
 )
-o.bind("SUPER + E", "Toggle emulator workspace", hl.dsp.workspace.toggle_special("emulator"))
+
+-- ===== Email scratchpad =====
+-- SUPER+E toggles a special workspace named "email", renamed from "emulator".
+-- Nothing else referred to the old name: work_emulator_launch.sh above only
+-- runs the emulator and never targeted that workspace.
+--
+-- tenzin.auto-workspace puts Outlook on special:email at login, and
+-- hide_special_on_workspace_change in Omarchy's looknfeel keeps it out of the
+-- way until this key brings it back.
+
+o.bind("SUPER + E", "Toggle email workspace", hl.dsp.workspace.toggle_special("email"))
 
 -- ===== Lock screen =====
 
@@ -125,10 +135,6 @@ o.bind("SUPER + I", "Toggle window split", hl.dsp.layout("togglesplit"))
 hl.unbind("PRINT") -- was: Screenshot
 o.bind("PRINT", "Screenshot", "omarchy-capture-screenshot smart")
 o.bind("SHIFT + PRINT", "Screenshot to clipboard", "omarchy-capture-screenshot smart copy")
-
--- ===== Monitor config TUI =====
-
-o.bind("SUPER + M", "Monitor config", "omarchy-launch-tui hyprdynamicmonitors tui")
 
 -- ===== Per-monitor workspaces =====
 -- Keys for the mmsbrggr.per-monitor-workspaces bar widget, which gives every
