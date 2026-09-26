@@ -23,3 +23,22 @@ test_hyprland_requires_resolve_in_repo() {
     fail "hyprland.lua requires resolve to tracked files" "missing: $missing"
   fi
 }
+
+test_work_overlay_matches_contract() {
+  local o="$HOME/omarchy_configuration/overlays/work"
+  local missing=""
+  for p in overlay.toml dotfiles manifests; do
+    [[ -e "$o/$p" ]] || missing+="$p "
+  done
+  if [[ -z "$missing" ]]; then
+    pass "work overlay matches the contract shape"
+  else
+    fail "work overlay matches the contract shape" "missing: $missing"
+  fi
+}
+
+test_work_overlay_is_private() {
+  local vis
+  vis="$(gh repo view ToRexZ/omarchy-dotfiles-work --json visibility --jq .visibility 2>/dev/null || echo MISSING)"
+  assert_eq "PRIVATE" "$vis" "work overlay repo is private"
+}
