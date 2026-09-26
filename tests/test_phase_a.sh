@@ -711,3 +711,27 @@ test_patched_plugins_have_no_uncommitted_work() {
     fail "patched plugins have no uncommitted work" "$dirty"
   fi
 }
+
+# --- Task 8: the cloned built-ins (battery, power) now have real git history ---
+# --- instead of existing nowhere but this disk --------------------------------
+
+test_cloned_builtins_have_remotes() {
+  local bad=""
+  for p in capra_vhr.battery capra_vhr.power; do
+    git -C "$HOME/.config/omarchy/plugins/$p" remote get-url origin >/dev/null 2>&1 \
+      || bad+="$p "
+  done
+  if [[ -z "$bad" ]]; then
+    pass "cloned built-ins have an origin remote"
+  else
+    fail "cloned built-ins have an origin remote" "no remote: $bad"
+  fi
+}
+
+test_cloned_builtin_ids_are_unchanged() {
+  local a b
+  a="$(jq -r .id "$HOME/.config/omarchy/plugins/capra_vhr.battery/manifest.json")"
+  b="$(jq -r .id "$HOME/.config/omarchy/plugins/capra_vhr.power/manifest.json")"
+  assert_eq "capra_vhr.battery" "$a" "battery id unchanged"
+  assert_eq "capra_vhr.power" "$b" "power id unchanged"
+}
