@@ -9,6 +9,16 @@
 # verified this does not start matching capra_vhr: no token differs from it
 # only by case.
 #
+# Fix round 2 widened the list. Every addition was a real employer string that
+# passed the narrow list cleanly: the ROS packages example_nav and example_hmi, the
+# second Jira project key PROJ-, the partner brand partnerco, and the build agent
+# ci-build-agent-N. They are added as whole identifiers, never as a bare
+# `company_` prefix: $HOME is /home/capra_vhr and the plugin ids are capra_vhr.*,
+# so `company_` would match every absolute path in every repo and hand back the
+# false-positive storm this narrow list exists to prevent. The issue key is anchored to a
+# following digit so it only matches issue keys, and the agent token is anchored to the
+# agent name rather than the hosting provider.
+#
 # Every check captures its producer's output into a variable and tests it with
 # `[[ -n ]]`. It must never be written as `git grep ... | grep -q .`: under
 # `set -o pipefail` that shape FAILS OPEN. `grep -q` exits at the first match,
@@ -20,7 +30,7 @@
 # overflow the 64 KiB pipe buffer, which is what makes the race deterministic.
 set -Euo pipefail
 
-TOKENS='exampleorg|example-ros|example_ros|ExampleVPN|example\.com|example-build|example-debug|example-stage|libexample|Example Org|ci\.example|10\.0\.0'
+TOKENS='exampleorg|example-ros|example_ros|example_nav|example_hmi|ExampleVPN|example\.com|example-build|example-debug|example-stage|libexample|Example Org|ci\.example|10\.0\.0|PROJ-[0-9]|partnerco|ci-build-agent'
 
 repo="${1:?usage: scrub-gate <repo-path>}"
 cd "$repo" || exit 2

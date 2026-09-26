@@ -492,3 +492,126 @@ test_no_vendored_upstream_bulk_under_captured_config() {
     fail "$what" "over $((limit / 1024)) KiB: $big"
   fi
 }
+
+# --- Fix round 2: the prbuilds publication gates ----------------------------
+#
+# Task 6 strips the employer out of the prbuilds plugin and publishes the
+# result as a PUBLIC repo. Nothing pinned that, so a half-scrubbed or
+# accidentally-private repo would have shipped silently.
+#
+# Same three-step probe as test_work_overlay_is_private, and for the same
+# reason: "cannot check" (network down, or gh unauthenticated) must never be
+# conflated with "check failed" (reachable and authenticated, but the repo is
+# missing, private, or dirty). Each cause is probed on its own evidence, in
+# order, so a later step's failure can only mean what it claims to mean.
+#
+# These FAIL until the repo is actually published. That is the point: they are
+# the gate, and a gate that passes before the work is done is not one.
+
+PRBUILDS_REPO="ToRexZ/omarchy-prbuilds"
+# The noreply address that actually associates a commit with the ToRexZ
+# account (github user id 54134767). The bare ToRexZ@users.noreply.github.com
+# form was invented and associates with nothing, which is what fix round 2
+# caught before anything was pushed.
+PRBUILDS_AUTHOR_EMAIL="54134767+ToRexZ@users.noreply.github.com"
+
+# Returns 0 when GitHub is reachable AND gh is authenticated, so a test can
+# tell "cannot check" from "check failed" in one call. Prints the reason.
+_gh_can_check() {
+  if ! timeout 8 gh api /zen >/dev/null 2>&1; then
+    printf 'GitHub API unreachable'
+    return 1
+  fi
+  if ! timeout 8 gh auth status >/dev/null 2>&1; then
+    printf 'gh not authenticated'
+    return 1
+  fi
+  return 0
+}
+
+test_prbuilds_is_published_public() {
+  local what="prbuilds repo is published and public"
+  local why
+  if ! why="$(_gh_can_check)"; then
+    pass "$what (skipped: $why)"
+    return
+  fi
+
+  local vis rc
+  vis="$(timeout 8 gh repo view "$PRBUILDS_REPO" --json visibility --jq .visibility 2>&1)"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    fail "$what" "gh repo view $PRBUILDS_REPO failed (exit $rc): $(printf '%s' "$vis" | head -1)"
+    return
+  fi
+  assert_eq "PUBLIC" "$vis" "$what"
+}
+
+test_prbuilds_published_clone_is_scrubbed_and_correctly_authored() {
+  # Checks the PUBLISHED artefact, not the local candidate: a clean working
+  # copy on this disk says nothing about what actually reached GitHub.
+  local what="published prbuilds is scrubbed in tree and history"
+  local author_what="published prbuilds commits carry the associating author address"
+  local why
+  if ! why="$(_gh_can_check)"; then
+    pass "$what (skipped: $why)"
+    pass "$author_what (skipped: $why)"
+    return
+  fi
+
+  local tmp; tmp="$(mktemp -d)"; trap '[[ -n "${tmp:-}" ]] && rm -rf "$tmp"; trap - RETURN' RETURN
+
+  local out rc
+  out="$(GIT_TERMINAL_PROMPT=0 timeout 60 git clone -q \
+    "https://github.com/$PRBUILDS_REPO.git" "$tmp/p" 2>&1)"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    # Reachable and authenticated, so a clone failure is a real finding.
+    fail "$what" "git clone failed (exit $rc): $(printf '%s' "$out" | head -1)"
+    fail "$author_what" "no clone to inspect"
+    return
+  fi
+
+  local gate
+  gate="$("$REPO_ROOT/bin/scrub-gate" "$tmp/p" 2>&1)"
+  rc=$?
+  if [[ $rc -eq 0 ]]; then
+    pass "$what"
+  else
+    fail "$what" "scrub-gate exit $rc: $(printf '%s' "$gate" | head -3 | tr '\n' ' ')"
+  fi
+
+  # Every commit, author and committer alike. One wrong-author commit is
+  # enough, and rewriting it after publication changes every sha.
+  local wrong
+  wrong="$(git -C "$tmp/p" log --all --format='%ae%n%ce' | sort -u \
+    | grep -vxF "$PRBUILDS_AUTHOR_EMAIL")" || true
+  if [[ -z "$wrong" ]]; then
+    pass "$author_what"
+  else
+    fail "$author_what" "unexpected address(es): $(printf '%s' "$wrong" | tr '\n' ' ')"
+  fi
+}
+
+test_prbuilds_repo_name_is_already_claimed() {
+  # The brief asked for this as `gh repo create ... | grep 'already exists'`.
+  # That is a WRITE: run before publication it does not observe a collision,
+  # it CREATES the repo -- a test that silently publishes is worse than no
+  # test. The observable property is the same one `gh repo create` would trip
+  # over, so it is read instead: the name resolves to a repo owned by us.
+  local what="prbuilds repo name is claimed, so a re-create would collide"
+  local why
+  if ! why="$(_gh_can_check)"; then
+    pass "$what (skipped: $why)"
+    return
+  fi
+
+  local got rc
+  got="$(timeout 8 gh repo view "$PRBUILDS_REPO" --json nameWithOwner --jq .nameWithOwner 2>&1)"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    fail "$what" "gh repo view $PRBUILDS_REPO failed (exit $rc): $(printf '%s' "$got" | head -1)"
+    return
+  fi
+  assert_eq "$PRBUILDS_REPO" "$got" "$what"
+}

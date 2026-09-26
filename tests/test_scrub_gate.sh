@@ -180,3 +180,60 @@ test_gate_verdict_agrees_with_a_direct_capture_on_this_repo() {
     fail "$what" "direct capture: dirty=$dirty ($n tree hits), gate exit: $status"
   fi
 }
+
+# --- Fix round 2: the widened token list ------------------------------------
+#
+# example_nav, example_hmi, PROJ-4268, partnerco and ci-build-agent-2 were all real
+# employer content found in the prbuilds plugin, and all five passed the
+# narrow list cleanly. They are now tokens. The obvious "fix" -- a bare
+# `company_` prefix -- is the one thing that must never be added: $HOME is
+# /home/capra_vhr, so it would match every absolute path in every repo.
+# test_gate_ignores_the_os_username above is what pins that, and it has to keep
+# passing alongside these.
+
+test_gate_catches_a_newly_added_token() {
+  local tmp; tmp="$(mktemp -d)"; trap '[[ -n "${tmp:-}" ]] && rm -rf "$tmp"; trap - RETURN' RETURN
+  _scrub_fixture "$tmp/r" "the ros package example_nav and issue PROJ-4268 on ci-build-agent-2 with a partnerco lift"
+
+  local out status
+  out="$("$REPO_ROOT/bin/scrub-gate" "$tmp/r" 2>&1)"
+  status=$?
+
+  if [[ "$status" -ne 0 ]]; then
+    pass "gate catches the fix-round-2 tokens (exit status)"
+  else
+    fail "gate catches the fix-round-2 tokens (exit status)" "widened tokens still pass the gate"
+  fi
+  local t
+  for t in example_nav PROJ-4268 ci-build-agent-2 partnerco; do
+    assert_contains "$out" "$t" "gate reports the matched token ($t)"
+  done
+}
+
+test_gate_has_no_bare_company_underscore_token() {
+  # Read from the script rather than asserted by behaviour, because a bare
+  # `company_` would still pass every fixture above -- it only shows up as a
+  # storm of false positives on real repos full of /home/capra_vhr paths.
+  local what="gate's token list has no bare company_ prefix"
+  local tokens
+  tokens="$(sed -n "s/^TOKENS='\(.*\)'$/\1/p" "$REPO_ROOT/bin/scrub-gate")"
+  if [[ -z "$tokens" ]]; then
+    fail "$what" "could not read TOKENS out of bin/scrub-gate"
+    return
+  fi
+
+  local bad="" t
+  while IFS= read -r t; do
+    [[ -n "$t" ]] || continue
+    # Anything that a /home/capra_vhr path would match: capra_ followed by
+    # nothing, or by a character class / quantifier rather than a literal name.
+    [[ "$t" == "company_" ]] && bad+="[$t] "
+    [[ "$t" == company_[.\[\(*+?] ]] && bad+="[$t] "
+  done < <(printf '%s\n' "$tokens" | tr '|' '\n')
+
+  if [[ -z "$bad" ]]; then
+    pass "$what"
+  else
+    fail "$what" "these would match the OS username: $bad"
+  fi
+}
