@@ -3,12 +3,40 @@
 # functions here as they move, split and rewrite these repos.
 
 test_no_untracked_config_in_base_repo() {
-  local out
-  out="$(git -C "$REPO_ROOT" status --porcelain -- dotfiles/ | grep '^??' || true)"
-  if [[ -z "$out" ]]; then
-    pass "no untracked files under dotfiles/"
+  # There are two ways a captured file silently fails to reach a clone, and
+  # only one of them shows up in a plain `git status`:
+  #   1. never `git add`ed           -> listed as `??`
+  #   2. matched by some .gitignore  -> listed as nothing at all, without --ignored
+  # (2) is how dotfiles/omarchy/themes/aetheria/README.md went missing: the
+  # captured theme brought its upstream .gitignore (`*.md`, `.git/`) along with
+  # its content, and that vendored file then governed this repo. A
+  # captured-but-ignored file is exactly the "lives only on this disk" failure
+  # this phase exists to end, so it has to fail the same as an untracked one.
+  #
+  # The timestamped backups omarchy and the install scripts leave behind *are*
+  # ignored on purpose, by this repo's own root .gitignore. `git check-ignore
+  # -v` names the file that supplied the rule, so this accepts the repo root's
+  # own rules and rejects any .gitignore that arrived as captured content.
+  local dirs=(dotfiles/ home/ bin-local/ manifests/)
+  local what="no untracked or silently ignored files under captured config"
+  local problems="" p src
+
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    problems+="untracked: $p; "
+  done < <(git -C "$REPO_ROOT" status --porcelain -- "${dirs[@]}" | sed -n 's/^?? //p')
+
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    src="$(git -C "$REPO_ROOT" check-ignore -v -- "$p" 2>/dev/null | cut -f1)"
+    [[ "$src" == .gitignore:* ]] && continue
+    problems+="ignored by ${src:-<unknown>}: $p; "
+  done < <(git -C "$REPO_ROOT" status --porcelain --ignored -- "${dirs[@]}" | sed -n 's/^!! //p')
+
+  if [[ -z "$problems" ]]; then
+    pass "$what"
   else
-    fail "no untracked files under dotfiles/" "$out"
+    fail "$what" "$problems"
   fi
 }
 
@@ -103,11 +131,35 @@ test_every_audited_homeless_file_is_captured() {
 }
 
 test_xcompose_carries_no_employer_address() {
+  # The address is never written down here. Until this fix round it was: the
+  # failure message below held a literal work address, so the test that exists
+  # to keep employer addresses out of the public tree was itself putting one
+  # there. The pattern now comes from bin/scrub-gate's own TOKENS list, which
+  # also widens the check from one address to every employer token.
   local f="$REPO_ROOT/home/.XCompose"
-  if grep -q 'example\.com' "$f" 2>/dev/null; then
-    fail "base .XCompose has no employer address" "vhr@example.com is still in the base copy"
+  local what="base .XCompose has no employer address"
+
+  # A missing file used to pass vacuously: `grep -q ... nonexistent` is
+  # non-zero, which took the else branch.
+  if [[ ! -f "$f" ]]; then
+    fail "$what" "home/.XCompose is missing -- nothing was checked"
+    return
+  fi
+
+  local tokens
+  tokens="$(sed -n "s/^TOKENS='\(.*\)'$/\1/p" "$REPO_ROOT/bin/scrub-gate")"
+  if [[ -z "$tokens" ]]; then
+    fail "$what" "could not read TOKENS out of bin/scrub-gate"
+    return
+  fi
+
+  local hits
+  hits="$(grep -inE "$tokens" "$f")" || true
+  if [[ -z "$hits" ]]; then
+    pass "$what"
   else
-    pass "base .XCompose has no employer address"
+    fail "$what" \
+      "an employer token from bin/scrub-gate's list is still in the base copy, line(s): $(printf '%s' "$hits" | cut -d: -f1 | tr '\n' ' ')"
   fi
 }
 
@@ -144,4 +196,299 @@ test_work_overlay_is_private() {
     return
   fi
   assert_eq "PRIVATE" "$vis" "$what"
+}
+
+# --- Fix round 1: splits that actually reassemble ---------------------------
+#
+# Three files are split between this public repo and the private work overlay.
+# shell.json was the only one that was ever put back together again: the other
+# two had a scrubbed base copy and an orphan overlay fragment with nothing
+# wiring them to each other. These pin all of it.
+
+test_git_config_split_reassembles_with_the_overlay() {
+  # base dotfiles/git/config + the overlay's ~/.gitconfig.d fragment must
+  # produce the same user.email the live ~/.config/git/config has.
+  #
+  # The include is absolute (tilde) on purpose: git resolves a relative
+  # include.path against the *including file's* directory, which is
+  # ~/.config/git/ -- inside the base repo's stow target, where no overlay
+  # fragment can ever be.
+  local what="git config split reassembles with the overlay"
+  local base="$REPO_ROOT/dotfiles/git/config"
+  local frag="$HOME/omarchy_configuration/overlays/work/home/.gitconfig.d/work-email"
+  local live="$HOME/.config/git/config"
+
+  local f
+  for f in "$base" "$frag" "$live"; do
+    if [[ ! -f "$f" ]]; then
+      fail "$what" "missing: $f"
+      return
+    fi
+  done
+
+  local tmp; tmp="$(mktemp -d)"; trap '[[ -n "${tmp:-}" ]] && rm -rf "$tmp"; trap - RETURN' RETURN
+  mkdir -p "$tmp/home/.gitconfig.d"
+  cp "$frag" "$tmp/home/.gitconfig.d/work-email"
+
+  local want got
+  want="$(git config -f "$live" --get user.email 2>/dev/null)" || true
+  got="$(HOME="$tmp/home" git config -f "$base" --includes --get user.email 2>/dev/null)" || true
+
+  if [[ -n "$want" && "$want" == "$got" ]]; then
+    pass "$what"
+  else
+    fail "$what" "reassembled user.email does not match the live one (live set: $([[ -n "$want" ]] && echo yes || echo no), reassembled set: $([[ -n "$got" ]] && echo yes || echo no))"
+  fi
+
+  # And the base alone has to be a usable git config: no employer identity of
+  # its own, and no error from the dangling include.
+  local rc leaked
+  HOME="$tmp/nohome" git config -f "$base" --includes --list >/dev/null 2>&1
+  rc=$?
+  leaked="$(HOME="$tmp/nohome" git config -f "$base" --includes --get user.email 2>/dev/null)" || true
+  if [[ $rc -eq 0 && -z "$leaked" ]]; then
+    pass "base git config is clean and parses with no overlay applied"
+  else
+    fail "base git config is clean and parses with no overlay applied" \
+      "git config exit $rc, user.email set: $([[ -n "$leaked" ]] && echo yes || echo no)"
+  fi
+}
+
+test_xcompose_split_reassembles_with_the_overlay() {
+  # bin/assemble-xcompose is the .XCompose equivalent of `jq -f shell.json.jq`.
+  # Assembled base + overlay fragment must compile to the same compose table as
+  # the live ~/.XCompose.
+  local what="XCompose split reassembles with the overlay"
+  local base="$REPO_ROOT/home/.XCompose"
+  local fragdir="$HOME/omarchy_configuration/overlays/work/home/.XCompose.d"
+  local live="$HOME/.XCompose"
+  local assemble="$REPO_ROOT/bin/assemble-xcompose"
+
+  local f
+  for f in "$base" "$live" "$assemble"; do
+    if [[ ! -e "$f" ]]; then
+      fail "$what" "missing: $f"
+      return
+    fi
+  done
+  if [[ ! -d "$fragdir" ]]; then
+    fail "$what" "overlay fragment directory missing: $fragdir"
+    return
+  fi
+
+  if ! command -v xkbcli >/dev/null 2>&1; then
+    pass "$what (skipped: xkbcli not installed, cannot compile a compose table)"
+    return
+  fi
+
+  local tmp; tmp="$(mktemp -d)"; trap '[[ -n "${tmp:-}" ]] && rm -rf "$tmp"; trap - RETURN' RETURN
+  "$assemble" "$base" "$fragdir" > "$tmp/assembled" 2>/dev/null
+
+  local got want
+  got="$(xkbcli compile-compose "$tmp/assembled" 2>/dev/null | sort)"
+  want="$(xkbcli compile-compose "$live" 2>/dev/null | sort)"
+  if [[ -n "$want" && "$got" == "$want" ]]; then
+    pass "$what"
+  else
+    fail "$what" "assembled table differs from the live ~/.XCompose"
+  fi
+
+  # The reason the include is generated rather than written into the base file:
+  # libxkbcommon aborts the whole table on a missing include, so a hardcoded
+  # one would cost a base-only machine every sequence it has.
+  local rc
+  xkbcli compile-compose --test "$base" >/dev/null 2>&1
+  rc=$?
+  if [[ $rc -eq 0 ]]; then
+    pass "base .XCompose still compiles with no overlay applied"
+  else
+    fail "base .XCompose still compiles with no overlay applied" "xkbcli exit $rc"
+  fi
+}
+
+test_base_keybindings_carry_no_employer_content() {
+  # Pattern comes from bin/scrub-gate's TOKENS so no employer string is
+  # written down here.
+  local what="base hypr keybindings and autostart are employer-free"
+  local tokens
+  tokens="$(sed -n "s/^TOKENS='\(.*\)'$/\1/p" "$REPO_ROOT/bin/scrub-gate")"
+  if [[ -z "$tokens" ]]; then
+    fail "$what" "could not read TOKENS out of bin/scrub-gate"
+    return
+  fi
+
+  local hits f
+  hits=""
+  for f in dotfiles/hypr/bindings.lua dotfiles/hypr/autostart.lua; do
+    if [[ ! -f "$REPO_ROOT/$f" ]]; then
+      fail "$what" "missing: $f"
+      return
+    fi
+    local n
+    n="$(grep -icE "$tokens" "$REPO_ROOT/$f")" || true
+    [[ "$n" -gt 0 ]] && hits+="$f:$n "
+  done
+
+  if [[ -z "$hits" ]]; then
+    pass "$what"
+  else
+    fail "$what" "employer tokens still present, file:count -- $hits"
+  fi
+}
+
+test_overlay_keybinding_fragment_is_loaded_by_the_base_bindings() {
+  # The keybindings split is only real if a machine with the overlay applied
+  # still gets the binds. This runs the actual base bindings.lua under a
+  # stubbed Hyprland Lua API -- once with the overlay's bindings.d fragment
+  # present, once without -- and compares what got bound.
+  #
+  # The expected key list is produced by running the overlay fragment through
+  # the same stub rather than being written out here, so the public repo never
+  # has to name a work app.
+  local what="overlay bindings.d fragment reaches the base bindings.lua"
+  local bindings="$REPO_ROOT/dotfiles/hypr/bindings.lua"
+  local frag="$HOME/omarchy_configuration/overlays/work/dotfiles/hypr/bindings.d/work.lua"
+
+  if ! command -v lua >/dev/null 2>&1; then
+    pass "$what (skipped: lua not installed)"
+    return
+  fi
+  local f
+  for f in "$bindings" "$frag"; do
+    if [[ ! -f "$f" ]]; then
+      fail "$what" "missing: $f"
+      return
+    fi
+  done
+
+  local tmp; tmp="$(mktemp -d)"; trap '[[ -n "${tmp:-}" ]] && rm -rf "$tmp"; trap - RETURN' RETURN
+  mkdir -p "$tmp/cfg/hypr/bindings.d" "$tmp/empty/hypr"
+  cp "$frag" "$tmp/cfg/hypr/bindings.d/work.lua"
+
+  cat > "$tmp/harness.lua" <<'LUA'
+local bound = {}
+local function noop() end
+local function maker() return noop end
+hl = {
+  unbind = noop,
+  dsp = {
+    focus = maker(), layout = maker(),
+    window = { close = maker(), resize = maker(), swap = maker() },
+    workspace = { move = maker(), toggle_special = maker() },
+  },
+}
+o = {
+  bind = function(key) bound[#bound + 1] = key end,
+  launch_on_start = noop,
+  exec_on_start = noop,
+  launch_webapp = maker(),
+}
+dofile(os.getenv("BINDINGS"))
+for _, key in ipairs(bound) do print(key) end
+LUA
+
+  local want with without
+  want="$(BINDINGS="$frag" lua "$tmp/harness.lua" 2>/dev/null | sort -u)"
+  if [[ -z "$want" ]]; then
+    fail "$what" "the overlay fragment bound nothing -- harness or fragment is broken"
+    return
+  fi
+  with="$(XDG_CONFIG_HOME="$tmp/cfg" BINDINGS="$bindings" lua "$tmp/harness.lua" 2>/dev/null | sort -u)"
+  without="$(XDG_CONFIG_HOME="$tmp/empty" BINDINGS="$bindings" lua "$tmp/harness.lua" 2>/dev/null | sort -u)"
+
+  local missing="" leaked="" k
+  while IFS= read -r k; do
+    [[ -n "$k" ]] || continue
+    grep -qxF "$k" <<<"$with" || missing+="[$k] "
+    grep -qxF "$k" <<<"$without" && leaked+="[$k] "
+  done <<<"$want"
+
+  if [[ -z "$missing" ]]; then
+    pass "$what (binds arrive with the overlay applied)"
+  else
+    fail "$what (binds arrive with the overlay applied)" "not bound: $missing"
+  fi
+  if [[ -z "$leaked" ]]; then
+    pass "$what (and are absent with no overlay applied)"
+  else
+    fail "$what (and are absent with no overlay applied)" "base binds them on its own: $leaked"
+  fi
+}
+
+# --- Fix round 1: themes are pinned, not vendored ---------------------------
+
+test_every_installed_theme_is_captured_or_pinned() {
+  # A theme on this machine is either tracked here as files (local content, no
+  # upstream to clone from) or recorded in manifests/themes.toml as remote plus
+  # commit. Anything in neither place lives only on this disk.
+  local manifest="$REPO_ROOT/manifests/themes.toml"
+  local what="every installed omarchy theme is captured or pinned"
+  local missing="" d name
+
+  for d in "$HOME"/.config/omarchy/themes/*/; do
+    [[ -d "$d" ]] || continue
+    name="$(basename "$d")"
+    # An empty directory is not a theme (aether is a 0-byte leftover).
+    [[ -n "$(ls -A "$d" 2>/dev/null)" ]] || continue
+    [[ -d "$REPO_ROOT/dotfiles/omarchy/themes/$name" ]] && continue
+    grep -qx "name = \"$name\"" "$manifest" 2>/dev/null && continue
+    missing+="$name "
+  done
+
+  if [[ -z "$missing" ]]; then
+    pass "$what"
+  else
+    fail "$what" "neither tracked nor pinned: $missing"
+  fi
+}
+
+test_every_theme_pin_is_reachable_offline() {
+  # Network-free: the pinned commit must exist in the clone the pin was read
+  # from, so a typo or a truncated sha cannot survive to Phase B.
+  local manifest="$REPO_ROOT/manifests/themes.toml"
+  local what="every theme pin resolves in its local clone"
+
+  if [[ ! -f "$manifest" ]]; then
+    fail "$what" "manifests/themes.toml is missing"
+    return
+  fi
+
+  local bad="" seen=0 name commit
+  while read -r name commit; do
+    [[ -n "$name" && -n "$commit" ]] || continue
+    seen=$((seen + 1))
+    git -C "$HOME/.config/omarchy/themes/$name" cat-file -e "${commit}^{commit}" 2>/dev/null \
+      || bad+="$name@${commit:0:8} "
+  done < <(awk -F'"' '/^name = /{n=$2} /^commit = /{print n, $2}' "$manifest")
+
+  if [[ "$seen" -eq 0 ]]; then
+    fail "$what" "no [[theme]] pins found in $manifest"
+  elif [[ -z "$bad" ]]; then
+    pass "$what ($seen pins)"
+  else
+    fail "$what" "unresolvable: $bad"
+  fi
+}
+
+test_no_vendored_upstream_bulk_under_captured_config() {
+  # The captured tree is configuration, not asset storage. Four upstream themes
+  # brought ~85 MB of backgrounds and previews in here (a single 13 MB PNG
+  # among them) before they were replaced by manifests/themes.toml. Third-party
+  # bulk belongs in a manifest (themes.toml, plugins.toml) or a package, the
+  # same way git-filter-repo and the 8.8 MB share-picker binary already do.
+  local limit=$((256 * 1024))
+  local what="no vendored bulk under the captured config"
+  local big="" f sz
+
+  while IFS= read -r f; do
+    [[ -f "$REPO_ROOT/$f" ]] || continue   # skips symlinks and the nvim gitlink
+    sz="$(stat -c%s "$REPO_ROOT/$f" 2>/dev/null)" || continue
+    [[ "$sz" -gt "$limit" ]] && big+="$f (${sz}B) "
+  done < <(git -C "$REPO_ROOT" ls-files dotfiles/ home/ bin-local/ manifests/)
+
+  if [[ -z "$big" ]]; then
+    pass "$what (nothing over $((limit / 1024)) KiB)"
+  else
+    fail "$what" "over $((limit / 1024)) KiB: $big"
+  fi
 }

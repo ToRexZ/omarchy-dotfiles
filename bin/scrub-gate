@@ -8,6 +8,16 @@
 # (EXAMPLE-ROS, example org, CI.EXAMPLE must not slip through) --
 # verified this does not start matching capra_vhr: no token differs from it
 # only by case.
+#
+# Every check captures its producer's output into a variable and tests it with
+# `[[ -n ]]`. It must never be written as `git grep ... | grep -q .`: under
+# `set -o pipefail` that shape FAILS OPEN. `grep -q` exits at the first match,
+# which closes the pipe; `git grep` is then killed by SIGPIPE and exits 141;
+# pipefail makes 141 the pipeline's status; and the `if` is therefore false on
+# exactly the repos that have the most to hide. Measured on this repo:
+# `PIPESTATUS=141 0`, pipeline rc 141, gate exit 0, with 59 real hits in the
+# tree. tests/test_scrub_gate.sh pins this against a fixture big enough to
+# overflow the 64 KiB pipe buffer, which is what makes the race deterministic.
 set -Euo pipefail
 
 TOKENS='exampleorg|example-ros|example_ros|ExampleVPN|example\.com|example-build|example-debug|example-stage|libexample|Example Org|ci\.example|10\.0\.0'
@@ -17,9 +27,10 @@ cd "$repo" || exit 2
 
 status=0
 
-if git grep -IinE "$TOKENS" -- . 2>/dev/null | grep -q .; then
+tree_hits="$(git grep -IinE "$TOKENS" -- . 2>/dev/null)" || true
+if [[ -n "$tree_hits" ]]; then
   echo "employer tokens in working tree:" >&2
-  git grep -IinE "$TOKENS" -- . >&2
+  printf '%s\n' "$tree_hits" >&2
   status=1
 fi
 
@@ -34,9 +45,10 @@ if [[ -n "$untracked_hits" ]]; then
   status=1
 fi
 
-if git log -p --all 2>/dev/null | grep -inE "$TOKENS" | grep -q .; then
+history_hits="$(git log -p --all 2>/dev/null | grep -inE "$TOKENS")" || true
+if [[ -n "$history_hits" ]]; then
   echo "employer tokens in history:" >&2
-  git log -p --all | grep -inE "$TOKENS" | head -20 >&2
+  printf '%s\n' "$history_hits" | head -20 >&2
   status=1
 fi
 

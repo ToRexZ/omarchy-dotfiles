@@ -1,0 +1,47 @@
+# Custom Omarchy themes installed at ~/.config/omarchy/themes/.
+#
+# Third-party themes are recorded as upstream remote plus pinned commit, not
+# vendored. Copying their content in was costing this repo ~85 MB of
+# backgrounds and preview images (one 13 MB PNG, several over 4 MB) for four
+# themes nobody here wrote a line of -- all four working trees are clean at the
+# commits below, so there was nothing local in them to preserve. This is the
+# same approach manifests/plugins.toml takes for plugins, and the same reason
+# git-filter-repo and the 8.8 MB hyprland-preview-share-picker binary are
+# recorded rather than committed.
+#
+# A theme with genuinely local content and no upstream stays as files under
+# dotfiles/omarchy/themes/. Today that is ristretto: one hand-written
+# neovim.lua, no remote, nothing to clone it from.
+#
+# Phase B's bootstrap clones each entry to
+# ~/.config/omarchy/themes/<name> and checks out `commit`. `branch` is the
+# branch the pin was taken from, recorded because it is not always the
+# remote's default.
+#
+# Nothing here was fetched: the remotes and commits were read from the local
+# clones under ~/.config/omarchy/themes/, which are untouched. The clones are
+# also in the Phase A backup, so the pins have two offline sources.
+
+[[theme]]
+name = "aetheria"
+url = "https://github.com/JJDizz1L/aetheria.git"
+commit = "df7fed242c0ccc5272c5a3d2943c32b3c34faf71"
+branch = "omarchy-aetheria-theme"
+
+[[theme]]
+name = "futurism"
+url = "https://github.com/bjarneo/omarchy-futurism-theme.git"
+commit = "e9d64852eb5ac6ed6f7d65f272faaae54135405c"
+branch = "main"
+
+[[theme]]
+name = "one-dark-pro"
+url = "https://github.com/sc0ttman/omarchy-one-dark-pro-theme.git"
+commit = "ce6879ec2473ed96139c97eee6c85119bdd4748c"
+branch = "main"
+
+[[theme]]
+name = "pandora"
+url = "https://github.com/imbypass/omarchy-pandora-theme.git"
+commit = "4dce2aa81f86366cf511654d9616b693d3c7f97e"
+branch = "main"
