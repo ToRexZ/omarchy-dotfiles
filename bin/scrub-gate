@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Exit 1 if an employer token appears in a repo's working tree or its history.
+#
+# The OS username is capra_vhr and $HOME is /home/capra_vhr, so "the company name" alone is
+# not a token -- it matches every absolute path and the capra_vhr.* plugin ids.
+# Only the tokens below identify the employer.
+set -Euo pipefail
+
+TOKENS='exampleorg|example-ros|example_ros|ExampleVPN|example\.com|example-build|example-debug|example-stage|libexample|Example Org|ci\.example|10\.0\.0'
+
+repo="${1:?usage: scrub-gate <repo-path>}"
+cd "$repo" || exit 2
+
+status=0
+
+if git grep -InE "$TOKENS" -- . 2>/dev/null | grep -q .; then
+  echo "employer tokens in working tree:" >&2
+  git grep -InE "$TOKENS" -- . >&2
+  status=1
+fi
+
+if git log -p --all 2>/dev/null | grep -nE "$TOKENS" | grep -q .; then
+  echo "employer tokens in history:" >&2
+  git log -p --all | grep -nE "$TOKENS" | head -20 >&2
+  status=1
+fi
+
+exit "$status"
