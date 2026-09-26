@@ -13,14 +13,29 @@ test_no_untracked_config_in_base_repo() {
 }
 
 test_hyprland_requires_resolve_in_repo() {
-  local missing=""
-  for m in windows workspaces; do
-    [[ -f "$REPO_ROOT/dotfiles/hypr/$m.lua" ]] || missing+="$m "
-  done
+  # Parses the live require("hypr.X") graph out of the captured hyprland.lua,
+  # rather than pinning today's known-good module list, so a future
+  # require("hypr.something") with no matching file gets caught even if
+  # nobody remembers to update this test.
+  local f="$REPO_ROOT/dotfiles/hypr/hyprland.lua"
+  local what="hyprland.lua requires resolve to tracked files"
+
+  if [[ ! -f "$f" ]]; then
+    fail "$what" "hyprland.lua not found at $f"
+    return
+  fi
+
+  local missing="" mod
+  while IFS= read -r mod; do
+    [[ -n "$mod" ]] || continue
+    [[ -f "$REPO_ROOT/dotfiles/hypr/$mod.lua" ]] || missing+="$mod "
+  done < <(grep -oE 'require\("hypr\.[A-Za-z0-9_]+"\)' "$f" \
+            | sed -E 's/require\("hypr\.([A-Za-z0-9_]+)"\)/\1/')
+
   if [[ -z "$missing" ]]; then
-    pass "hyprland.lua requires resolve to tracked files"
+    pass "$what"
   else
-    fail "hyprland.lua requires resolve to tracked files" "missing: $missing"
+    fail "$what" "missing: $missing"
   fi
 }
 
@@ -56,6 +71,43 @@ test_work_overlay_matches_contract() {
     pass "$what"
   else
     fail "$what" "missing from tracked tree: $missing"
+  fi
+}
+
+test_every_audited_homeless_file_is_captured() {
+  local missing=""
+  local want=(
+    dotfiles/hypr/hyprland.lua dotfiles/hypr/monitors.lua
+    dotfiles/hypr/input.lua dotfiles/hypr/looknfeel.lua
+    dotfiles/hypr/hyprlock.conf dotfiles/hypr/hypridle.conf
+    dotfiles/hypr/hyprsunset.conf dotfiles/hypr/xdph.conf
+    dotfiles/omarchy/shell.json
+    dotfiles/omarchy/extensions/omarchy-menu.jsonc
+    dotfiles/mise/config.toml dotfiles/git/config
+    dotfiles/systemd/user/ssh-agent.service
+    dotfiles/systemd/user/voxtype.service
+    dotfiles/systemd/user/omarchy-logitech.service
+    dotfiles/systemd/user/omarchy-logitech.service.d/10-system-python.conf
+    dotfiles/hyprland-preview-share-picker/config.yaml
+    home/.XCompose home/.bash_profile home/.profile home/.zshrc
+    bin-local/logi bin-local/herdr-focus-pane
+  )
+  for f in "${want[@]}"; do
+    [[ -e "$REPO_ROOT/$f" ]] || missing+="$f "
+  done
+  if [[ -z "$missing" ]]; then
+    pass "all audited homeless files are captured"
+  else
+    fail "all audited homeless files are captured" "missing: $missing"
+  fi
+}
+
+test_xcompose_carries_no_employer_address() {
+  local f="$REPO_ROOT/home/.XCompose"
+  if grep -q 'example\.com' "$f" 2>/dev/null; then
+    fail "base .XCompose has no employer address" "vhr@example.com is still in the base copy"
+  else
+    pass "base .XCompose has no employer address"
   fi
 }
 

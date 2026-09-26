@@ -1,0 +1,4 @@
+#!/bin/bash
+export MISE_MINIMUM_RELEASE_AGE=0
+mise use -g --quiet "http:muse[url=https://api.meta.ai/muse-launcher.sh,bin=muse,version_list_url=https://api.meta.ai/muse-code/channels/muse-stable,version_json_path=.version]" || exit 1
+exec mise x "http:muse[url=https://api.meta.ai/muse-launcher.sh,bin=muse,version_list_url=https://api.meta.ai/muse-code/channels/muse-stable,version_json_path=.version]" -- "muse" "$@"

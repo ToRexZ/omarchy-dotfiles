@@ -1,0 +1,116 @@
+{
+  "bar": {
+    "centerAnchor": "omarchy.clock",
+    "layout": {
+      "center": [
+        {
+          "id": "omarchy.indicators"
+        },
+        {
+          "id": "omarchy.clock",
+          "birthYear": 2000,
+          "format": "dddd HH:mm",
+          "formatAlt": "d MMMM 'W'ww yyyy",
+          "lifeExpectancy": 100,
+          "verticalFormat": "HH\n—\nmm"
+        },
+        {
+          "id": "omarchy.system-update"
+        },
+        {
+          "id": "omarchy.keyboard-layout"
+        },
+        {
+          "favourites": [
+            "Aarhus, DK",
+            "Aalborg, DK"
+          ],
+          "id": "mryll.meteobar",
+          "location": "Aarhus, DK"
+        },
+        {
+          "id": "bitr0t.system-monitor",
+          "chipMode": "minimal",
+          "monitors": [
+            "cpu",
+            "memory"
+          ]
+        }
+      ],
+      "left": [
+        {
+          "id": "omarchy.menu"
+        },
+        {
+          "id": "mmsbrggr.per-monitor-workspaces",
+          "count": 10
+        },
+        {
+          "id": "tenzin.auto-workspace"
+        },
+        {
+          "id": "agx.screen-time"
+        }
+      ],
+      "right": [
+        {
+          "id": "vleeuwenmenno.sshtunnels"
+        },
+        {
+          "id": "io.github.rvcabc.logitech"
+        },
+        {
+          "id": "io.github.rizmi.portwatch"
+        },
+        {
+          "id": "wg-omarchy"
+        },
+        {
+          "id": "maduki-tech.omado"
+        },
+        {
+          "id": "omarchy.agents"
+        },
+        {
+          "id": "omarchy.bluetooth"
+        },
+        {
+          "id": "omarchy.network"
+        },
+        {
+          "id": "omarchy.audio"
+        },
+        {
+          "id": "crmne.hyprmoncfg"
+        },
+        {
+          "id": "capra_vhr.power"
+        }
+      ]
+    },
+    "position": "top",
+    "transparent": false
+  },
+  "idle": {
+    "lock": 300,
+    "screensaver": 150
+  },
+  "plugins": [
+    {
+      "id": "jnodavid.omarkey"
+    },
+    {
+      "id": "bobbynicholas.omaland"
+    },
+    {
+      "id": "capra_vhr.battery"
+    }
+  ],
+  "version": 1,
+  "disabledPlugins": [
+    "omarchy.battery"
+  ],
+  "cloneSourceRestores": [
+    "capra_vhr.battery"
+  ]
+}

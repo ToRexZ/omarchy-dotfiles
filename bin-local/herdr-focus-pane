@@ -1,0 +1,97 @@
+#!/bin/bash
+# Focus a herdr pane and raise the terminal window showing it.
+#
+# Invoked from the desktop notifications posted by
+# ~/.claude/hooks/herdr-notify-click.sh, through omarchy's `omarchy-exec-argv`
+# hint (see `omarchy notification send --exec`). Omarchy runs this argv
+# detached when the toast is clicked.
+#
+# Usage: herdr-focus-pane <pane-id|agent-name>
+#        herdr-focus-pane --print-window   # print "<address>\t<title>", no side effects
+
+set -uo pipefail
+
+# Find the window showing herdr, by walking up from each herdr process until we
+# reach a pid that owns a window. Matching on process ancestry rather than a
+# window class keeps this working if the terminal ever changes. Prints
+# "<address>\t<title>" per candidate window.
+herdr_windows() {
+  local -A win_by_pid=()
+  local pid address title
+  while IFS=$'\t' read -r pid address title; do
+    [[ -n $pid ]] && win_by_pid[$pid]="$address"$'\t'"$title"
+  done < <(hyprctl clients -j 2>/dev/null | jq -r '.[] | "\(.pid)\t\(.address)\t\(.title)"')
+
+  local hpid depth
+  while read -r hpid; do
+    [[ -n $hpid ]] || continue
+    pid=$hpid
+    depth=0
+    while [[ -n $pid && $pid -gt 1 && $depth -lt 24 ]]; do
+      if [[ -n ${win_by_pid[$pid]:-} ]]; then
+        printf '%s\n' "${win_by_pid[$pid]}"
+        break
+      fi
+      pid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null)
+      ((depth++))
+    done
+  done < <(pgrep -x herdr 2>/dev/null) | awk 'NF' | sort -u
+}
+
+if [[ ${1:-} == --print-window ]]; then
+  herdr_windows | head -1
+  exit 0
+fi
+
+target=${1:-}
+if [[ -z $target ]]; then
+  echo "usage: ${0##*/} <pane-id|agent-name>" >&2
+  exit 1
+fi
+
+focus_window() {
+  # Hyprland 0.56 in Lua-config mode rejects the legacy `dispatch <name> "args"`
+  # form, so the Lua call is the real one; the old form stays as a safety net
+  # for a pre-Lua Hyprland.
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:$1\" })" >/dev/null 2>&1 ||
+    hyprctl dispatch focuswindow "address:$1" >/dev/null 2>&1
+}
+
+# 1. Point herdr's UI at the pane. This switches workspace, tab and pane, and
+#    marks the agent seen. Agent targets accept a pane id or a live agent name.
+herdr agent focus "$target" >/dev/null 2>&1
+
+# 2. Raise the terminal showing herdr.
+mapfile -t candidates < <(herdr_windows)
+if [[ ${#candidates[@]} -eq 0 ]]; then
+  exit 0 # herdr is detached or headless: the pane switch above is all we can do
+fi
+
+chosen=${candidates[0]}
+if [[ ${#candidates[@]} -gt 1 ]]; then
+  # Several terminals are attached. herdr's window_title carries the workspace
+  # label, so prefer the window already showing the target's workspace.
+  ws_id=$(herdr pane get "$target" 2>/dev/null | jq -r '.result.pane.workspace_id // empty')
+  ws_label=$(herdr workspace list 2>/dev/null |
+    jq -r --arg w "$ws_id" '.result.workspaces[]? | select(.workspace_id==$w) | .label // empty')
+  if [[ -n $ws_label ]]; then
+    for c in "${candidates[@]}"; do
+      if [[ ${c#*$'\t'} == *"$ws_label"* ]]; then
+        chosen=$c
+        break
+      fi
+    done
+  fi
+fi
+
+addr=${chosen%%$'\t'*}
+[[ -n $addr ]] || exit 0
+focus_window "$addr"
+
+# 3. With follow_mouse=1 and mouse_refocus=true, Hyprland re-evaluates focus
+#    under the pointer when the toast layer closes, which can immediately undo
+#    the focus above. Re-assert once if that happened.
+sleep 0.25
+if [[ $(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty') != "$addr" ]]; then
+  focus_window "$addr"
+fi

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Name=Monitors TUI
+Comment=Monitors TUI
+Exec=xdg-terminal-exec --app-id=TUI.float -e hyprdynamicmonitors tui
+Terminal=false
+Type=Application
+Icon=/home/capra_vhr/.local/share/applications/icons/Monitors TUI.png
+StartupNotify=true

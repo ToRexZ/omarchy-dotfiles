@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Local wrapper — NOT the symlink `logi service install` would create, and not
+# managed by the plugin (so `logi service uninstall` will report it as
+# "left-alone"; delete it by hand when removing the plugin).
+#
+# mise owns `python3` on PATH, but solaar's logitech_receiver library lives in
+# the system Python only, so the backend must be run with /usr/bin/python3.
+exec /usr/bin/python3 "$HOME/.config/omarchy/plugins/io.github.rvcabc.logitech/bin/logi" "$@"
