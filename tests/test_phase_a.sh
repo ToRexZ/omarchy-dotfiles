@@ -616,21 +616,85 @@ test_prbuilds_repo_name_is_already_claimed() {
   assert_eq "$PRBUILDS_REPO" "$got" "$what"
 }
 
+# --- Fix round 1 (Task 7): a URL match is not proof the remote holds the ---
+# --- commit -----------------------------------------------------------------
+#
+# test_patched_plugins_point_at_own_forks originally only string-matched
+# `git remote get-url origin`. That passes identically whether the push
+# actually landed, failed, was never run, or pushed an unrelated branch --
+# exactly the failure this whole plan exists to prevent: believing work is
+# safe on a remote when it is not. It now checks two independent properties
+# per plugin: the URL points at the right fork, AND that fork's current
+# branch genuinely holds this checkout's own HEAD commit (a read-only
+# `git ls-remote`; no fetch, no push).
+
+# Returns 0 when GitHub is reachable at all (a public, unauthenticated
+# endpoint). Deliberately narrower than _gh_can_check: this test only ever
+# needs anonymous git-over-https to read a public fork, so reusing
+# _gh_can_check's gh-auth step would manufacture a new false "skipped" for a
+# check that never needed gh auth in the first place.
+_github_reachable() {
+  if ! timeout 8 gh api /zen >/dev/null 2>&1; then
+    printf 'GitHub unreachable'
+    return 1
+  fi
+  return 0
+}
+
+# Checks one plugin checkout: origin URL points at the wanted fork, AND that
+# fork's current branch holds this checkout's own HEAD commit. Prints a
+# failure description and returns 1 if either property doesn't hold; prints
+# nothing and returns 0 if both do. Factored out so it can be exercised
+# directly against a scratch clone (see task-7-report.md's fix-round-1
+# section) without touching the real plugin checkouts.
+_plugin_fork_holds_head() {
+  local dir="$1" want="$2"
+  local url
+  url="$(git -C "$dir" remote get-url origin 2>/dev/null || echo none)"
+  if [[ "$url" != *"$want"* ]]; then
+    printf '(url->%s)' "$url"
+    return 1
+  fi
+
+  local branch head remote_sha
+  branch="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+  head="$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo none)"
+  remote_sha="$(timeout 8 git ls-remote "$url" "$branch" 2>/dev/null | cut -f1)"
+  if [[ -z "$remote_sha" ]]; then
+    printf "(no '%s' on remote)" "$branch"
+    return 1
+  fi
+  if [[ "$remote_sha" != "$head" ]]; then
+    printf '(remote %s=%s local=%s)' "$branch" "${remote_sha:0:7}" "${head:0:7}"
+    return 1
+  fi
+  return 0
+}
+
 test_patched_plugins_point_at_own_forks() {
+  local what="patched plugins point at their own forks and the forks hold HEAD"
+  local why
+  if ! why="$(_github_reachable)"; then
+    pass "$what (skipped: $why)"
+    return
+  fi
+
   local bad=""
   local -A want=(
     [io.github.rvcabc.logitech]="ToRexZ/omarchy-logitech"
     [maduki-tech.omado]="ToRexZ/omado"
   )
   for p in "${!want[@]}"; do
-    local url
-    url="$(git -C "$HOME/.config/omarchy/plugins/$p" remote get-url origin 2>/dev/null || echo none)"
-    [[ "$url" == *"${want[$p]}"* ]] || bad+="$p(->$url) "
+    local dir="$HOME/.config/omarchy/plugins/$p" detail
+    if ! detail="$(_plugin_fork_holds_head "$dir" "${want[$p]}")"; then
+      bad+="$p$detail "
+    fi
   done
+
   if [[ -z "$bad" ]]; then
-    pass "patched plugins point at ToRexZ forks"
+    pass "$what"
   else
-    fail "patched plugins point at ToRexZ forks" "$bad"
+    fail "$what" "$bad"
   fi
 }
 
