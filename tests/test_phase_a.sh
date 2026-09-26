@@ -735,3 +735,64 @@ test_cloned_builtin_ids_are_unchanged() {
   assert_eq "capra_vhr.battery" "$a" "battery id unchanged"
   assert_eq "capra_vhr.power" "$b" "power id unchanged"
 }
+
+# --- Task 9: the nvim config no longer carries the employer module -----------
+#
+# The tooling moved to the private ToRexZ/nvim-work overlay, loaded from
+# ~/.config/nvim-overlays/. These two pin both halves of that split: nothing
+# left behind in the public repo, and the private repo actually there to
+# receive it.
+
+test_nvim_config_has_no_work_module() {
+  local what="nvim-config carries no work module"
+  local repo="$HOME/.config/nvim"
+
+  if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+    fail "$what" "$repo is not a git repository"
+    return
+  fi
+
+  # The TRACKED tree, not the filesystem. `[[ -e ]]` answers "is it on this
+  # disk", which is the wrong question twice over: a gitignored build artefact
+  # would fail the test for nothing, and a file deleted from the working copy
+  # but still in the index would pass it while every clone still got the
+  # module. `git ls-files` reads the index, which is what a clone receives.
+  #
+  # scripts/work-* is in the list beyond the three the brief named: those
+  # three are the module, but the host-side scripts are the same split and
+  # leaving them unpinned would let half the removal regress unnoticed.
+  local left
+  left="$(git -C "$repo" ls-files -- \
+    'lua/work' \
+    'plugin/example-build.lua' \
+    'lua/config/remote-dap.lua' \
+    'scripts/work-*')"
+
+  if [[ -z "$left" ]]; then
+    pass "$what"
+  else
+    fail "$what" "still tracked: $(printf '%s' "$left" | tr '\n' ' ')"
+  fi
+}
+
+test_nvim_work_repo_exists_and_is_private() {
+  # Same three-step shape as the other published-repo checks: "cannot check"
+  # (network down, gh unauthenticated) is a skip, and only a reachable,
+  # authenticated query that comes back missing or non-PRIVATE is a finding.
+  local repo="ToRexZ/nvim-work"
+  local what="nvim-work repo exists and is private"
+  local why
+  if ! why="$(_gh_can_check)"; then
+    pass "$what (skipped: $why)"
+    return
+  fi
+
+  local vis rc
+  vis="$(timeout 8 gh repo view "$repo" --json visibility --jq .visibility 2>&1)"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    fail "$what" "gh repo view $repo failed (exit $rc): $(printf '%s' "$vis" | head -1)"
+    return
+  fi
+  assert_eq "PRIVATE" "$vis" "$what"
+}
