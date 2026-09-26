@@ -509,11 +509,11 @@ test_no_vendored_upstream_bulk_under_captured_config() {
 # the gate, and a gate that passes before the work is done is not one.
 
 PRBUILDS_REPO="ToRexZ/omarchy-prbuilds"
-# The noreply address that actually associates a commit with the ToRexZ
-# account (github user id 54134767). The bare ToRexZ@users.noreply.github.com
-# form was invented and associates with nothing, which is what fix round 2
-# caught before anything was pushed.
-PRBUILDS_AUTHOR_EMAIL="54134767+ToRexZ@users.noreply.github.com"
+# The public git identity the user chose for their own repos on 2026-09-26,
+# superseding the GitHub noreply form an earlier round assumed. Pinned here so a
+# stray commit made under the global config -- which is still the employer
+# address -- cannot reach a published repo unnoticed.
+PRBUILDS_AUTHOR_EMAIL="victor.risager@hotmail.com"
 
 # Returns 0 when GitHub is reachable AND gh is authenticated, so a test can
 # tell "cannot check" from "check failed" in one call. Prints the reason.
