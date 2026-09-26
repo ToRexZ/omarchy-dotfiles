@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Exit 1 if an employer token appears in a repo's working tree or its history.
+# Exit 1 if an employer token appears in a repo's working tree (tracked or
+# untracked, non-ignored), or its history.
 #
 # The OS username is capra_vhr and $HOME is /home/capra_vhr, so "the company name" alone is
 # not a token -- it matches every absolute path and the capra_vhr.* plugin ids.
-# Only the tokens below identify the employer.
+# Only the tokens below identify the employer. Matching is case-insensitive
+# (EXAMPLE-ROS, example org, CI.EXAMPLE must not slip through) --
+# verified this does not start matching capra_vhr: no token differs from it
+# only by case.
 set -Euo pipefail
 
 TOKENS='exampleorg|example-ros|example_ros|ExampleVPN|example\.com|example-build|example-debug|example-stage|libexample|Example Org|ci\.example|10\.0\.0'
@@ -13,15 +17,26 @@ cd "$repo" || exit 2
 
 status=0
 
-if git grep -InE "$TOKENS" -- . 2>/dev/null | grep -q .; then
+if git grep -IinE "$TOKENS" -- . 2>/dev/null | grep -q .; then
   echo "employer tokens in working tree:" >&2
-  git grep -InE "$TOKENS" -- . >&2
+  git grep -IinE "$TOKENS" -- . >&2
   status=1
 fi
 
-if git log -p --all 2>/dev/null | grep -nE "$TOKENS" | grep -q .; then
+# `git grep` only searches tracked files. A file that exists in the working
+# tree but has not been `git add`ed yet (and is not gitignored) would
+# otherwise sit there silently while the gate reports clean.
+untracked_hits="$(git ls-files --others --exclude-standard -z \
+  | xargs -0 -r grep -HIinE "$TOKENS" -- 2>/dev/null)" || true
+if [[ -n "$untracked_hits" ]]; then
+  echo "employer tokens in untracked files:" >&2
+  printf '%s\n' "$untracked_hits" >&2
+  status=1
+fi
+
+if git log -p --all 2>/dev/null | grep -inE "$TOKENS" | grep -q .; then
   echo "employer tokens in history:" >&2
-  git log -p --all | grep -nE "$TOKENS" | head -20 >&2
+  git log -p --all | grep -inE "$TOKENS" | head -20 >&2
   status=1
 fi
 

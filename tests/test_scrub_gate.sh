@@ -25,11 +25,17 @@ test_gate_catches_employer_token_in_tree() {
   local tmp; tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
   _scrub_fixture "$tmp/r" "builds run on example-monorepo nightly"
 
-  if "$REPO_ROOT/bin/scrub-gate" "$tmp/r" >/dev/null 2>&1; then
-    fail "gate catches example-monorepo in the tree" "gate passed a real token"
+  local out status
+  out="$("$REPO_ROOT/bin/scrub-gate" "$tmp/r" 2>&1)"
+  status=$?
+
+  if [[ "$status" -ne 0 ]]; then
+    pass "gate catches example-monorepo in the tree (exit status)"
   else
-    pass "gate catches example-monorepo in the tree"
+    fail "gate catches example-monorepo in the tree (exit status)" "gate passed a real token"
   fi
+  assert_contains "$out" "employer tokens" "gate names the tree finding"
+  assert_contains "$out" "example-monorepo" "gate reports the matched token (tree)"
 }
 
 test_gate_catches_employer_token_only_in_history() {
@@ -38,9 +44,33 @@ test_gate_catches_employer_token_only_in_history() {
   ( cd "$tmp/r" && printf 'clean\n' > f.txt \
     && git add f.txt && git -c user.email=t@t -c user.name=t commit -qm scrub )
 
-  if "$REPO_ROOT/bin/scrub-gate" "$tmp/r" >/dev/null 2>&1; then
-    fail "gate catches a token only present in history" "clean tip hid a dirty history"
+  local out status
+  out="$("$REPO_ROOT/bin/scrub-gate" "$tmp/r" 2>&1)"
+  status=$?
+
+  if [[ "$status" -ne 0 ]]; then
+    pass "gate catches a token only present in history (exit status)"
   else
-    pass "gate catches a token only present in history"
+    fail "gate catches a token only present in history (exit status)" "clean tip hid a dirty history"
   fi
+  assert_contains "$out" "employer tokens" "gate names the history finding"
+  assert_contains "$out" "ExampleVPN" "gate reports the matched token (history)"
+}
+
+test_gate_catches_employer_token_in_untracked_file() {
+  local tmp; tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
+  _scrub_fixture "$tmp/r" "clean tracked content"
+  printf 'staging deploys go through example-stage\n' > "$tmp/r/untracked.txt"
+
+  local out status
+  out="$("$REPO_ROOT/bin/scrub-gate" "$tmp/r" 2>&1)"
+  status=$?
+
+  if [[ "$status" -ne 0 ]]; then
+    pass "gate catches an employer token in an untracked file (exit status)"
+  else
+    fail "gate catches an employer token in an untracked file (exit status)" "untracked file with a token passed the gate"
+  fi
+  assert_contains "$out" "employer tokens" "gate names the untracked finding"
+  assert_contains "$out" "example-stage" "gate reports the matched token (untracked)"
 }
