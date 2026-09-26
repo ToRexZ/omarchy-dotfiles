@@ -615,3 +615,35 @@ test_prbuilds_repo_name_is_already_claimed() {
   fi
   assert_eq "$PRBUILDS_REPO" "$got" "$what"
 }
+
+test_patched_plugins_point_at_own_forks() {
+  local bad=""
+  local -A want=(
+    [io.github.rvcabc.logitech]="ToRexZ/omarchy-logitech"
+    [maduki-tech.omado]="ToRexZ/omado"
+  )
+  for p in "${!want[@]}"; do
+    local url
+    url="$(git -C "$HOME/.config/omarchy/plugins/$p" remote get-url origin 2>/dev/null || echo none)"
+    [[ "$url" == *"${want[$p]}"* ]] || bad+="$p(->$url) "
+  done
+  if [[ -z "$bad" ]]; then
+    pass "patched plugins point at ToRexZ forks"
+  else
+    fail "patched plugins point at ToRexZ forks" "$bad"
+  fi
+}
+
+test_patched_plugins_have_no_uncommitted_work() {
+  local dirty=""
+  for p in io.github.rvcabc.logitech maduki-tech.omado; do
+    local n
+    n="$(git -C "$HOME/.config/omarchy/plugins/$p" status --porcelain | wc -l)"
+    [[ "$n" -eq 0 ]] || dirty+="$p($n) "
+  done
+  if [[ -z "$dirty" ]]; then
+    pass "patched plugins have no uncommitted work"
+  else
+    fail "patched plugins have no uncommitted work" "$dirty"
+  fi
+}
