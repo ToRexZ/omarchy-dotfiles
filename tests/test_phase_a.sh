@@ -25,20 +25,71 @@ test_hyprland_requires_resolve_in_repo() {
 }
 
 test_work_overlay_matches_contract() {
+  # Checks what a clone would actually receive, not local disk: git tracks
+  # no empty directory, so a bare `mkdir -p` for a contract directory
+  # survives on this machine but vanishes from a clone of the pushed repo.
+  # `git ls-tree -r HEAD` is the tracked-tree truth; each contract directory
+  # must have at least one tracked path under it (a .gitkeep, if nothing
+  # else) to count as present. Network-free: reads the local overlay repo
+  # only, never clones.
   local o="$HOME/omarchy_configuration/overlays/work"
-  local missing=""
-  for p in overlay.toml dotfiles manifests; do
-    [[ -e "$o/$p" ]] || missing+="$p "
+  local what="work overlay matches the contract shape"
+
+  if [[ ! -d "$o/.git" ]]; then
+    fail "$what" "overlay not found at $o"
+    return
+  fi
+
+  local tree
+  tree="$(git -C "$o" ls-tree -r HEAD --name-only 2>&1)" || {
+    fail "$what" "git ls-tree failed: $tree"
+    return
+  }
+
+  local missing="" p
+  grep -qxF "overlay.toml" <<<"$tree" || missing+="overlay.toml "
+  for p in dotfiles home bashrc.d manifests manifests/desktop nvim install-scripts; do
+    grep -q "^${p}/" <<<"$tree" || missing+="$p "
   done
+
   if [[ -z "$missing" ]]; then
-    pass "work overlay matches the contract shape"
+    pass "$what"
   else
-    fail "work overlay matches the contract shape" "missing: $missing"
+    fail "$what" "missing from tracked tree: $missing"
   fi
 }
 
 test_work_overlay_is_private() {
-  local vis
-  vis="$(gh repo view ToRexZ/omarchy-dotfiles-work --json visibility --jq .visibility 2>/dev/null || echo MISSING)"
-  assert_eq "PRIVATE" "$vis" "work overlay repo is private"
+  # "Cannot check" (network down, or gh unauthenticated) must never be
+  # conflated with "check failed" (the earlier bug this replicates: b9adac3
+  # fixed the same shape for the backup test). Each cause is probed on its
+  # own evidence, in order, so a later step's failure can only mean what it
+  # claims to mean:
+  #   1. GitHub API reachability - a public, unauthenticated endpoint, so a
+  #      failure here is unambiguously network-down, not auth or the repo.
+  #   2. gh auth status - checked only once reachability is confirmed, so a
+  #      failure here is unambiguously "not logged in", not network.
+  #   3. The actual repo query - reachable and authenticated, so a missing
+  #      repo or wrong visibility here is a real finding, not a skip.
+  local repo="ToRexZ/omarchy-dotfiles-work"
+  local what="work overlay repo is private"
+
+  if ! timeout 8 gh api /zen >/dev/null 2>&1; then
+    pass "$what (skipped: GitHub API unreachable)"
+    return
+  fi
+
+  if ! timeout 8 gh auth status >/dev/null 2>&1; then
+    pass "$what (skipped: gh not authenticated)"
+    return
+  fi
+
+  local vis rc
+  vis="$(timeout 8 gh repo view "$repo" --json visibility --jq .visibility 2>&1)"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    fail "$what" "gh repo view failed (exit $rc): $vis"
+    return
+  fi
+  assert_eq "PRIVATE" "$vis" "$what"
 }
