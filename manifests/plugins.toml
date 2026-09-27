@@ -75,6 +75,11 @@ commit = "d42e8c15f9e3dd71e604e34f0ecf5b3dd85d1377"
 branch = "v1.1.0"
 
 [[plugin]]
+id = "mryll.meteobar"
+url = "https://github.com/ToRexZ/meteobar.git"
+commit = "dc00c12f57113ec558e2205dcd041be8be052d1a"
+
+[[plugin]]
 id = "omannotate"
 url = "https://github.com/Z0H0wizard/omannotate.git"
 commit = "d330b024055e893284856f07aa4b715cbab11ec6"
@@ -99,4 +104,9 @@ commit = "b024e48a2867c8662ca98c7472f114e67add8129"
 id = "vleeuwenmenno.sshtunnels"
 url = "https://github.com/vleeuwenmenno/omasshtunnels.git"
 commit = "32390c6171b7282ffd4418d2f9241da65fbc8e77"
+
+[[plugin]]
+id = "wg-omarchy"
+url = "https://github.com/ToRexZ/wg-omarchy.git"
+commit = "a25fe559a1764ca34df3a1641db89476e23779aa"
 
