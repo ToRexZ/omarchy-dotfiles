@@ -871,16 +871,40 @@ test_every_pin_is_reachable_from_its_remote() {
   # (egress fine, this specific pin doesn't resolve) -- same shape as
   # _github_reachable/_gh_can_check above: a known-public endpoint is probed
   # once for the whole test, and only a failure *there* is a skip.
+  #
+  # An entry marked `verified = false` is NOT silently skipped. That marker
+  # means bin/sync-plugins recorded the pin from a possibly-stale local
+  # remote-tracking branch because egress was down, so the manifest's own
+  # reachability claim does not cover it. With egress up it is a finding in its
+  # own right -- the manifest should have been regenerated -- and with egress
+  # down it is named rather than folded into the skip. Before this round an
+  # unverified pin was indistinguishable from a verified one in the file, and
+  # this test passed-as-skip in exactly the condition that produced them.
   local manifest="$REPO_ROOT/manifests/plugins.toml"
   local what="every recorded pin is reachable from its remote"
+
+  local unverified="" id url commit vflag
+  while read -r id url commit vflag; do
+    [[ "$vflag" == "false" ]] && unverified+="$id "
+  done < <(_manifest_pins "$manifest")
+
   local why
   if ! why="$(_github_reachable)"; then
-    pass "$what (skipped: $why)"
+    if [[ -n "$unverified" ]]; then
+      pass "$what (skipped: $why; unverified pins present and marked: $unverified)"
+    else
+      pass "$what (skipped: $why)"
+    fi
     return
   fi
 
-  local bad="" seen=0 id url commit dir
-  while read -r id url commit; do
+  if [[ -n "$unverified" ]]; then
+    fail "$what" "egress is up but these pins are still marked verified = false (re-run bin/sync-plugins): $unverified"
+    return
+  fi
+
+  local bad="" seen=0 dir
+  while read -r id url commit vflag; do
     [[ -n "$id" && -n "$url" && -n "$commit" ]] || continue
     seen=$((seen + 1))
     # The plugin checkout is the object donor --verify needs to answer the
@@ -891,7 +915,7 @@ test_every_pin_is_reachable_from_its_remote() {
     dir="$HOME/.config/omarchy/plugins/$id"
     "$REPO_ROOT/bin/sync-plugins" --verify "$dir" "$url" "$commit" >/dev/null 2>&1 \
       || bad+="$id@${commit:0:8} "
-  done < <(awk -F'"' '/^id = /{i=$2} /^url = /{u=$2} /^commit = /{print i, u, $2}' "$manifest")
+  done < <(_manifest_pins "$manifest")
 
   if [[ "$seen" -eq 0 ]]; then
     fail "$what" "no [[plugin]] pins found in $manifest"
@@ -899,6 +923,101 @@ test_every_pin_is_reachable_from_its_remote() {
     pass "$what ($seen pins)"
   else
     fail "$what" "unreachable: $bad"
+  fi
+}
+
+# Prints "<id> <url> <commit> <verified>" per [[plugin]] block, where
+# <verified> is "false" only for an entry carrying the `verified = false`
+# marker. Block-aware rather than line-aware: the marker sits after 'commit',
+# so the old print-on-the-commit-line parse could never have seen it.
+_manifest_pins() {
+  awk -F'"' '
+    /^\[\[plugin\]\]$/       { i=""; u=""; c=""; v="true"; next }
+    /^id = /                 { i=$2; next }
+    /^url = /                { u=$2; next }
+    /^commit = /             { c=$2; next }
+    /^verified = false$/     { v="false"; next }
+    /^$/                     { if (i && u && c) print i, u, c, v; i=""; u=""; c="" }
+    END                      { if (i && u && c) print i, u, c, v }
+  ' "$1"
+}
+
+test_an_unverifiable_pin_is_marked_and_distinguishable() {
+  # bin/sync-plugins' egress-down branch, exercised deterministically against
+  # a bare remote in a throwaway directory -- no network, no GitHub, nothing
+  # real written to. Both states are produced from the SAME checkout, so the
+  # only difference between the two manifests is what the tool knew.
+  #
+  # The hole this pins: when egress was down the tool fell back to a local
+  # origin/* ref, recorded the pin, and exited 0, writing nothing in the file
+  # to say the commit had never been checked against the remote -- while the
+  # file's own header asserted every commit was reachable. It also wrote
+  # `branch = "HEAD"`, because refs/remotes/origin/HEAD sorted first out of
+  # `for-each-ref | head -1`, and a bootstrap would have tried to check that
+  # out.
+  local what="an unverifiable pin is recorded marked, and tells apart from a verified one"
+  local sync="$REPO_ROOT/bin/sync-plugins"
+  local t; t="$(mktemp -d)" || { fail "$what" "mktemp failed"; return; }
+
+  (
+    set -e
+    export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
+    export GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
+    git init -q --bare -b main "$t/remote.git"
+    git clone -q "$t/remote.git" "$t/seed"
+    cd "$t/seed"
+    echo hi > f.txt && git add f.txt && git commit -qm c1
+    git push -q origin main
+    mkdir -p "$t/plugins"
+    git clone -q "$t/remote.git" "$t/plugins/demo.plugin"
+    cd "$t/plugins/demo.plugin"
+    printf '{"id":"demo.plugin"}\n' > manifest.json
+    git add manifest.json && git commit -qm manifest && git push -q origin main
+  ) >/dev/null 2>&1 || { rm -rf "$t"; fail "$what" "could not build the local fixture remote"; return; }
+
+  local err="" rc_ok rc_down
+
+  # Egress up, remote reachable: the ordinary live path.
+  PLUGINS_DIR="$t/plugins" SYNC_PLUGINS_OUT="$t/ok.toml" "$sync" >/dev/null 2>&1
+  rc_ok=$?
+  [[ "$rc_ok" -eq 0 ]] || err+="a live-verifiable pin exited $rc_ok; "
+  grep -q '^verified = false$' "$t/ok.toml" \
+    && err+="a live-verified pin was marked verified = false; "
+
+  # Remote gone AND the egress probe pointed at a path that does not exist, so
+  # "cannot check" is reached deterministically rather than "check failed".
+  mv "$t/remote.git" "$t/remote-gone.git"
+  SYNC_PLUGINS_EGRESS_PROBE_URL="$t/no-such-remote.git" \
+    PLUGINS_DIR="$t/plugins" SYNC_PLUGINS_OUT="$t/down.toml" "$sync" >/dev/null 2>&1
+  rc_down=$?
+
+  [[ "$rc_down" -ne 0 ]] || err+="an unverifiable pin exited 0; "
+  grep -q '^verified = false$' "$t/down.toml" \
+    || err+="an unverifiable pin was recorded with no marker; "
+  grep -q '^# UNVERIFIED:' "$t/down.toml" \
+    || err+="an unverifiable pin carries no explanatory comment; "
+  grep -q '^branch = "HEAD"$' "$t/down.toml" \
+    && err+="recorded branch = \"HEAD\", which is not checkout-able; "
+  grep -q '^id = "demo.plugin"$' "$t/down.toml" \
+    || err+="the plugin was dropped from the manifest entirely; "
+
+  # The parser the other tests use must see the difference too -- a marker
+  # nothing reads is no better than a stderr line.
+  [[ "$(_manifest_pins "$t/ok.toml" | awk '{print $4}')" == "true" ]] \
+    || err+="_manifest_pins called the verified pin unverified; "
+  [[ "$(_manifest_pins "$t/down.toml" | awk '{print $4}')" == "false" ]] \
+    || err+="_manifest_pins could not tell the unverified pin apart; "
+
+  # Same commit either way: the only difference is what the tool could prove.
+  [[ "$(_manifest_pins "$t/ok.toml" | awk '{print $3}')" \
+     == "$(_manifest_pins "$t/down.toml" | awk '{print $3}')" ]] \
+    || err+="the two runs disagreed about the commit; "
+
+  rm -rf "$t"
+  if [[ -z "$err" ]]; then
+    pass "$what"
+  else
+    fail "$what" "$err"
   fi
 }
 
