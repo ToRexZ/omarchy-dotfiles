@@ -796,3 +796,94 @@ test_nvim_work_repo_exists_and_is_private() {
   fi
   assert_eq "PRIVATE" "$vis" "$what"
 }
+
+# --- Task 12: every plugin recorded as a pinned, reachable git source --------
+#
+# The machine has 19 plugin checkouts (not 16, and not the 18 the brief
+# expected -- always re-derive from $HOME/.config/omarchy/plugins, never trust
+# a stated count). bin/sync-plugins refuses to record a pin no remote can
+# currently serve, so these two are read straight from what it actually wrote,
+# not from what it was hoped to write. A shrinking manifest is the intended
+# failure mode when a real plugin regresses (gains unpushed commits, loses its
+# origin remote, drifts behind upstream past what a tip-only check can
+# confirm) -- see task-12-report.md for the five real cases this caught here.
+
+test_every_installed_plugin_is_in_the_manifest() {
+  local manifest="$REPO_ROOT/manifests/plugins.toml" missing=""
+  for d in "$HOME"/.config/omarchy/plugins/*/; do
+    local id; id="$(jq -r .id "$d/manifest.json" 2>/dev/null)"
+    [[ -n "$id" && "$id" != null ]] || continue
+    grep -q "id = \"$id\"" "$manifest" 2>/dev/null || missing+="$id "
+  done
+  if [[ -z "$missing" ]]; then
+    pass "every installed plugin is in plugins.toml"
+  else
+    fail "every installed plugin is in plugins.toml" "missing: $missing"
+  fi
+}
+
+test_every_pin_is_reachable_from_its_remote() {
+  # "Cannot check" (egress down) must never be conflated with "check failed"
+  # (egress fine, this specific pin doesn't resolve) -- same shape as
+  # _github_reachable/_gh_can_check above: a known-public endpoint is probed
+  # once for the whole test, and only a failure *there* is a skip.
+  #
+  # The brief's original form of this test read the local fallback from
+  # "$HOME/.config/omarchy/plugins" itself (the parent of every checkout, and
+  # not a git repository) rather than from the individual plugin's own
+  # directory, so it could never actually succeed -- id is parsed alongside
+  # url/commit here specifically so the fallback can reach the right
+  # checkout's own objects (id and the plugin's directory name are the same
+  # string for every plugin currently installed).
+  local manifest="$REPO_ROOT/manifests/plugins.toml"
+  local what="every recorded pin is reachable from its remote"
+  local why
+  if ! why="$(_github_reachable)"; then
+    pass "$what (skipped: $why)"
+    return
+  fi
+
+  local bad="" seen=0 id url commit
+  while read -r id url commit; do
+    [[ -n "$id" && -n "$url" && -n "$commit" ]] || continue
+    seen=$((seen + 1))
+    git ls-remote "$url" 2>/dev/null | grep -q "$commit" \
+      || git -C "$HOME/.config/omarchy/plugins/$id" cat-file -e "${commit}^{commit}" 2>/dev/null \
+      || bad+="$id@${commit:0:8} "
+  done < <(awk -F'"' '/^id = /{i=$2} /^url = /{u=$2} /^commit = /{print i, u, $2}' "$manifest")
+
+  if [[ "$seen" -eq 0 ]]; then
+    fail "$what" "no [[plugin]] pins found in $manifest"
+  elif [[ -z "$bad" ]]; then
+    pass "$what ($seen pins)"
+  else
+    fail "$what" "unreachable: $bad"
+  fi
+}
+
+test_non_default_branch_pins_record_their_branch() {
+  # Controller requirement: a pin whose commit is not on the remote's default
+  # branch must record 'branch', or a bootstrap that clones default and checks
+  # out 'commit' silently gets code that never ran here. Checked against the
+  # three checkouts known to sit on a non-default ref (two forks carrying a
+  # local patch on branch 'local-patch', and the private corne checkout on
+  # 'keyboard-status') rather than every entry, so this doesn't regress into
+  # demanding a branch field on plugins that are correctly on default.
+  local manifest="$REPO_ROOT/manifests/plugins.toml"
+  local what="plugins pinned off their remote's default branch record 'branch'"
+  local missing="" id block
+  for id in vhr.corne io.github.rvcabc.logitech maduki-tech.omado; do
+    block="$(awk -v id="$id" '
+      /^\[\[plugin\]\]$/ { buf=""; keep=0 }
+      { buf = buf $0 ORS }
+      $0 == "id = \"" id "\"" { keep=1 }
+      /^$/ { if (keep) { print buf; exit } }
+    ' "$manifest")"
+    grep -q '^branch = "' <<<"$block" || missing+="$id "
+  done
+  if [[ -z "$missing" ]]; then
+    pass "$what"
+  else
+    fail "$what" "no branch field recorded for: $missing"
+  fi
+}
