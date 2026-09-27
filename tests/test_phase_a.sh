@@ -2,6 +2,46 @@
 # Phase A capture-and-split checks. Later tasks append their own test_*
 # functions here as they move, split and rewrite these repos.
 
+# --- The private overlay, discovered rather than named ----------------------
+#
+# The work-specific half of this configuration lives in a separate, private
+# overlay repository. WHOSE it is is not this repository's business, and until
+# Task 11 fix round 1 these tests said so out loud: the overlay's directory
+# name, and both private repository names, were written down here in a public
+# file. They are read at runtime now -- the directory by looking for the one
+# that carries an overlay.toml, the repository names from that file -- so the
+# same tests work for any overlay and name none of them.
+#
+# Exactly one overlay is expected. Two is ambiguous, and guessing which one a
+# test meant is worse than saying so.
+_overlay_dir() {
+  local root="${OMARCHY_OVERLAYS:-$HOME/omarchy_configuration/overlays}" d found=""
+  [[ -d "$root" ]] || return 1
+  for d in "$root"/*/; do
+    [[ -f "$d/overlay.toml" ]] || continue
+    [[ -n "$found" ]] && return 2
+    found="${d%/}"
+  done
+  [[ -n "$found" ]] || return 1
+  printf '%s\n' "$found"
+}
+
+# One quoted scalar out of the overlay's overlay.toml: _overlay_meta repo
+_overlay_meta() {
+  local o; o="$(_overlay_dir)" || return 1
+  local v
+  v="$(sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"(.*)\"[[:space:]]*\$/\\1/p" \
+        "$o/overlay.toml" 2>/dev/null | head -1)"
+  [[ -n "$v" ]] || return 1
+  printf '%s\n' "$v"
+}
+
+# The token list the gate resolves on this machine, or empty. Tests that need
+# it SKIP when it is absent: since fix round 1 the list is supplied by the
+# overlay, so a public-only checkout legitimately has none, and reporting that
+# as a failure would train people to ignore a red suite.
+_effective_tokens() { "$REPO_ROOT/bin/scrub-gate" --print-tokens 2>/dev/null || true; }
+
 test_no_untracked_config_in_base_repo() {
   # There are two ways a captured file silently fails to reach a clone, and
   # only one of them shows up in a plain `git status`:
@@ -75,11 +115,15 @@ test_work_overlay_matches_contract() {
   # must have at least one tracked path under it (a .gitkeep, if nothing
   # else) to count as present. Network-free: reads the local overlay repo
   # only, never clones.
-  local o="$HOME/omarchy_configuration/overlays/work"
   local what="work overlay matches the contract shape"
+  local o
+  if ! o="$(_overlay_dir)"; then
+    fail "$what" "no single overlay found under ${OMARCHY_OVERLAYS:-$HOME/omarchy_configuration/overlays}"
+    return
+  fi
 
   if [[ ! -d "$o/.git" ]]; then
-    fail "$what" "overlay not found at $o"
+    fail "$what" "overlay at $o is not a git repository"
     return
   fi
 
@@ -91,7 +135,10 @@ test_work_overlay_matches_contract() {
 
   local missing="" p
   grep -qxF "overlay.toml" <<<"$tree" || missing+="overlay.toml "
-  for p in dotfiles home bashrc.d manifests manifests/desktop nvim install-scripts; do
+  # scrub-gate/ joined the contract in Task 11 fix round 1: the token list the
+  # public gate runs on is supplied from here, so an overlay without one leaves
+  # the gate unable to reach a verdict at all.
+  for p in dotfiles home bashrc.d manifests manifests/desktop nvim install-scripts scrub-gate; do
     grep -q "^${p}/" <<<"$tree" || missing+="$p "
   done
 
@@ -150,9 +197,9 @@ test_xcompose_carries_no_employer_address() {
   fi
 
   local tokens
-  tokens="$("$REPO_ROOT/bin/scrub-gate" --print-tokens)"
+  tokens="$(_effective_tokens)"
   if [[ -z "$tokens" ]]; then
-    fail "$what" "bin/scrub-gate --print-tokens produced nothing"
+    pass "$what (skipped: no token list on this machine)"
     return
   fi
 
@@ -178,8 +225,12 @@ test_work_overlay_is_private() {
   #      failure here is unambiguously "not logged in", not network.
   #   3. The actual repo query - reachable and authenticated, so a missing
   #      repo or wrong visibility here is a real finding, not a skip.
-  local repo="ToRexZ/omarchy-dotfiles-work"
   local what="work overlay repo is private"
+  local repo
+  if ! repo="$(_overlay_meta repo)"; then
+    pass "$what (skipped: no overlay, or it declares no repo)"
+    return
+  fi
 
   if ! timeout 8 gh api /zen >/dev/null 2>&1; then
     pass "$what (skipped: GitHub API unreachable)"
@@ -218,7 +269,7 @@ test_git_config_split_reassembles_with_the_overlay() {
   # fragment can ever be.
   local what="git config split reassembles with the overlay"
   local base="$REPO_ROOT/dotfiles/git/config"
-  local frag="$HOME/omarchy_configuration/overlays/work/home/.gitconfig.d/work-email"
+  local frag; frag="$(_overlay_dir)/home/.gitconfig.d/work-email"
   local live="$HOME/.config/git/config"
 
   local f
@@ -263,7 +314,7 @@ test_xcompose_split_reassembles_with_the_overlay() {
   # the live ~/.XCompose.
   local what="XCompose split reassembles with the overlay"
   local base="$REPO_ROOT/home/.XCompose"
-  local fragdir="$HOME/omarchy_configuration/overlays/work/home/.XCompose.d"
+  local fragdir; fragdir="$(_overlay_dir)/home/.XCompose.d"
   local live="$HOME/.XCompose"
   local assemble="$REPO_ROOT/bin/assemble-xcompose"
 
@@ -314,9 +365,9 @@ test_base_keybindings_carry_no_employer_content() {
   # written down here.
   local what="base hypr keybindings and autostart are employer-free"
   local tokens
-  tokens="$("$REPO_ROOT/bin/scrub-gate" --print-tokens)"
+  tokens="$(_effective_tokens)"
   if [[ -z "$tokens" ]]; then
-    fail "$what" "bin/scrub-gate --print-tokens produced nothing"
+    pass "$what (skipped: no token list on this machine)"
     return
   fi
 
@@ -350,23 +401,36 @@ test_overlay_keybinding_fragment_is_loaded_by_the_base_bindings() {
   # has to name a work app.
   local what="overlay bindings.d fragment reaches the base bindings.lua"
   local bindings="$REPO_ROOT/dotfiles/hypr/bindings.lua"
-  local frag="$HOME/omarchy_configuration/overlays/work/dotfiles/hypr/bindings.d/work.lua"
 
   if ! command -v lua >/dev/null 2>&1; then
     pass "$what (skipped: lua not installed)"
     return
   fi
-  local f
-  for f in "$bindings" "$frag"; do
-    if [[ ! -f "$f" ]]; then
-      fail "$what" "missing: $f"
-      return
-    fi
+  if [[ ! -f "$bindings" ]]; then
+    fail "$what" "missing: $bindings"
+    return
+  fi
+
+  # Every fragment the overlay ships, found by glob rather than by name -- the
+  # fragment used to be named here, which put the overlay's name in a public
+  # file for no benefit.
+  local o frags=()
+  if ! o="$(_overlay_dir)"; then
+    pass "$what (skipped: no overlay on this machine)"
+    return
+  fi
+  local g
+  for g in "$o"/dotfiles/hypr/bindings.d/*.lua; do
+    [[ -f "$g" ]] && frags+=("$g")
   done
+  if [[ ${#frags[@]} -eq 0 ]]; then
+    fail "$what" "the overlay ships no dotfiles/hypr/bindings.d/*.lua fragment"
+    return
+  fi
 
   local tmp; tmp="$(mktemp -d)"; trap '[[ -n "${tmp:-}" ]] && rm -rf "$tmp"; trap - RETURN' RETURN
   mkdir -p "$tmp/cfg/hypr/bindings.d" "$tmp/empty/hypr"
-  cp "$frag" "$tmp/cfg/hypr/bindings.d/work.lua"
+  cp "${frags[@]}" "$tmp/cfg/hypr/bindings.d/"
 
   cat > "$tmp/harness.lua" <<'LUA'
 local bound = {}
@@ -390,10 +454,13 @@ dofile(os.getenv("BINDINGS"))
 for _, key in ipairs(bound) do print(key) end
 LUA
 
-  local want with without
-  want="$(BINDINGS="$frag" lua "$tmp/harness.lua" 2>/dev/null | sort -u)"
+  local want="" with without f2
+  for f2 in "${frags[@]}"; do
+    want+="$(BINDINGS="$f2" lua "$tmp/harness.lua" 2>/dev/null)"$'\n'
+  done
+  want="$(printf '%s' "$want" | sort -u | sed '/^$/d')"
   if [[ -z "$want" ]]; then
-    fail "$what" "the overlay fragment bound nothing -- harness or fragment is broken"
+    fail "$what" "the overlay fragments bound nothing -- harness or fragment is broken"
     return
   fi
   with="$(XDG_CONFIG_HOME="$tmp/cfg" BINDINGS="$bindings" lua "$tmp/harness.lua" 2>/dev/null | sort -u)"
@@ -741,10 +808,11 @@ test_cloned_builtin_ids_are_unchanged() {
 
 # --- Task 9: the nvim config no longer carries the employer module -----------
 #
-# The tooling moved to the private ToRexZ/nvim-work overlay, loaded from
+# The tooling moved to a private nvim overlay, loaded from
 # ~/.config/nvim-overlays/. These two pin both halves of that split: nothing
 # left behind in the public repo, and the private repo actually there to
-# receive it.
+# receive it. Neither the module paths nor the repository name is written down
+# here -- both come from the overlay at runtime.
 
 test_nvim_config_has_no_work_module() {
   local what="nvim-config carries no work module"
@@ -761,20 +829,33 @@ test_nvim_config_has_no_work_module() {
   # but still in the index would pass it while every clone still got the
   # module. `git ls-files` reads the index, which is what a clone receives.
   #
-  # scripts/work-* is in the list beyond the three the brief named: those
-  # three are the module, but the host-side scripts are the same split and
-  # leaving them unpinned would let half the removal regress unnoticed.
-  # The build-environment suffix in that path is an employer token, so the
-  # pathspec is assembled around $_z -- empty -- rather than written out. No
-  # file under tests/ holds a token as a literal string; that invariant is what
-  # lets the gate scan this repo with no exclusions at all, and
-  # tests/test_scrub_gate.sh::test_gate_source_holds_no_literal_token pins it.
-  local _z='' left
-  left="$(git -C "$repo" ls-files -- \
-    'lua/work' \
-    "plugin/example${_z}-build.lua" \
-    'lua/config/remote-dap.lua' \
-    'scripts/work-*')"
+  # The pathspecs come from the overlay's nvim/removed-paths -- one pathspec
+  # per line -- rather than being written out here. Three of them name the
+  # employer directly and one contains a token outright, which is how they came
+  # to be assembled around an empty variable in an earlier round; the list is
+  # data about one employer's tooling, so it belongs with that employer's
+  # overlay and not in a public test file.
+  local o list
+  if ! o="$(_overlay_dir)" || [[ ! -f "$o/nvim/removed-paths" ]]; then
+    pass "$what (skipped: no overlay list of removed paths)"
+    return
+  fi
+  list="$o/nvim/removed-paths"
+
+  local specs=() line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" || "$line" == '#'* ]] && continue
+    specs+=("$line")
+  done < "$list"
+  if [[ ${#specs[@]} -eq 0 ]]; then
+    fail "$what" "$list lists no pathspec"
+    return
+  fi
+
+  local left
+  left="$(git -C "$repo" ls-files -- "${specs[@]}")"
 
   if [[ -z "$left" ]]; then
     pass "$what"
@@ -783,12 +864,16 @@ test_nvim_config_has_no_work_module() {
   fi
 }
 
-test_nvim_work_repo_exists_and_is_private() {
+test_nvim_overlay_repo_exists_and_is_private() {
   # Same three-step shape as the other published-repo checks: "cannot check"
   # (network down, gh unauthenticated) is a skip, and only a reachable,
   # authenticated query that comes back missing or non-PRIVATE is a finding.
-  local repo="ToRexZ/nvim-work"
-  local what="nvim-work repo exists and is private"
+  local what="nvim overlay repo exists and is private"
+  local repo
+  if ! repo="$(_overlay_meta nvim_repo)"; then
+    pass "$what (skipped: no overlay, or it declares no nvim_repo)"
+    return
+  fi
   local why
   if ! why="$(_gh_can_check)"; then
     pass "$what (skipped: $why)"

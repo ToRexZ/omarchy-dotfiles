@@ -1,0 +1,62 @@
+# bin/scrub-gate token list -- EXAMPLE. Every name below is invented.
+#
+# This file is documentation, not a source. scrub-gate does NOT read it: a
+# gate running on example tokens would find nothing in a real repository and
+# report exit 0, which is the one thing it must never do. Copy it, fill it in
+# with the names you actually need kept out of a public repository, and put
+# the copy where a private overlay supplies it:
+#
+#   <overlay>/scrub-gate/tokens                    (before stow)
+#   ~/.config/scrub-gate/tokens.d/<overlay-name>   (after stow)
+#
+# or point $SCRUB_GATE_TOKENS straight at it for a one-off run.
+#
+# FORMAT
+#   One extended-regex fragment per line, joined with | in the order read.
+#   Blank lines and # comments are ignored; leading and trailing whitespace is
+#   stripped, so a fragment may contain a space but may not begin or end with
+#   one. Matching is case-insensitive, so write each name once, in any case.
+#   A literal dot must be escaped -- `example\.com`, not `example.com`, which
+#   would also match `exampleXcom`.
+#
+# CHOOSING FRAGMENTS
+#   Whole identifiers, never bare prefixes. Check each one against your own
+#   username and $HOME first: if your login were `acme_jo`, the fragment
+#   `acme_` would match every absolute path on the machine, bury the real
+#   findings, and get the gate switched off within a day. That is why the list
+#   below names `acme_nav` and `acme_hmi` rather than `acme_`.
+#   tests/test_scrub_gate.sh enforces this against the real username.
+#
+#   Prefer a few narrow, high-signal names over a wide net. False positives
+#   are loud and cheap; a missed name is silent and permanent.
+
+# the company, run together and spaced
+acmerobotics
+Acme Robotics
+
+# source repositories and package prefixes
+acme-ros
+acme_ros
+acme_nav
+acme_hmi
+libacme
+
+# build environments
+acme-build
+acme-debug
+acme-stage
+
+# infrastructure: CI host, internal range, VPN profile, build agent
+ci\.internal\.example
+10\.99\.0
+AcmeVPN
+builder-amd-agent
+
+# issue tracker keys, anchored to a following digit so only real keys match
+ACME-[0-9]
+
+# mail domain
+acme\.example
+
+# third parties whose name would identify the employer by association
+fablift

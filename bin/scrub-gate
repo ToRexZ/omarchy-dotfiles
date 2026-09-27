@@ -1,56 +1,61 @@
 #!/usr/bin/env bash
-# Exit 1 if an employer token appears in a repo's working tree (tracked or
-# untracked, non-ignored), or anywhere in its history -- diff content AND
+# Exit non-zero if an employer token appears in a repo's working tree (tracked
+# or untracked, non-ignored), or anywhere in its history -- diff content AND
 # commit messages.
 #
-# The OS username is capra_vhr and $HOME is /home/capra_vhr, so "the company name" alone
-# is not a token -- it matches every absolute path and the capra_vhr.* plugin
-# ids. Only the strings in TOKENS identify the employer. Matching is
-# case-insensitive, so a shouted or title-cased spelling cannot slip through --
-# verified this does not start matching capra_vhr: no token differs from the OS
-# username by case alone.
-#
-# The list covers: the company name run together and spaced; the ROS package
-# prefixes (mono, nav, hmi); the WireGuard profile; the mail domain; the three
-# build-environment suffixes (build, debug, stage); the vendored library
-# prefix; the CI host; the internal /16; the second Jira project key, anchored
-# to a following digit so it only matches issue keys; the partner brand; and
-# the build agent, anchored to the agent name rather than to the hosting
-# provider. None is added as a bare `company_` prefix: $HOME is /home/capra_vhr
-# and the plugin ids are capra_vhr.*, so that one addition would match every
-# absolute path in every repo and hand back the false-positive storm this
-# narrow list exists to prevent.
+#   scrub-gate <repo-path>     0 clean | 1 tokens found | 2 usage | 3 NO VERDICT
+#   scrub-gate --print-tokens  the assembled regex
+#   scrub-gate --print-sources the files the list was read from
 #
 # ---------------------------------------------------------------------------
-# NO TOKEN IS WRITTEN DOWN IN THIS FILE, AND THE SCAN EXCLUDES NOTHING.
+# THE TOKEN LIST IS DATA, AND IT DOES NOT LIVE IN THIS REPOSITORY.
 #
-# Fix round 3 made this gate skip two paths -- bin/scrub-gate and
-# tests/test_scrub_gate.sh -- so that scanning this repo would stop matching
-# the gate's own token list and its own fixtures. That was the wrong axis, and
-# it was a hole that travels with the tool: the gate's whole job is to be
-# pointed at OTHER repos before they are published, and the published base repo
-# ships files at exactly those two paths. Measured against a scratch repo whose
-# only employer content sat at bin/scrub-gate and tests/test_scrub_gate.sh: the
-# gate reported exit 0. A publication gate that returns clean on two known
-# filenames is not a gate.
+# Earlier rounds kept the list here. Round 3 hid it from the scan by pathspec,
+# which put a hole in the tool that travelled to every repo it was pointed at.
+# Round 4 removed the pathspec and hid the list from the scan by assembling it
+# around an empty variable instead -- which fixed the matching, and fixed
+# nothing else: the tokens were still in a public file, in order, each one
+# annotated with what it was. A regex that cannot match itself is not the same
+# thing as a secret that is not written down.
 #
-# Excluding by content identity instead -- drop hit lines byte-equal to this
-# file's own TOKENS line -- narrows the hole but does not close it, and it
-# cannot cover history at all: every OLD spelling of the TOKENS line is a
-# different string, so the exclusion either misses them or has to soften into
-# a shape match, which is a hole again.
+# So the list is gone. It is supplied at runtime by a private overlay, and this
+# repository ships only bin/scrub-tokens.example, which names nobody. That is
+# also the right shape independently of secrecy: a second overlay, for a
+# different employer, brings its own list and needs no change here.
 #
-# The cause was never the scan. It was that this repo contained the tokens as
-# literal strings. So it no longer does: TOKENS is assembled around $_z, which
-# is empty, and tests/test_scrub_gate.sh builds its fixtures the same way. The
-# tokens exist at runtime and appear nowhere in this repository's bytes, so the
-# scan needs no exclusions -- every path, every line, every commit message, in
-# this repo and in every other.
+# Sources, in order. (1) wins outright if set; (2) and (3) are unioned, so
+# several overlays can contribute at once:
 #
-# This fails CLOSED. Write a future token out as a literal and the gate starts
-# reporting its own source: loud and safe, never a quiet new blind spot.
-# tests/test_scrub_gate.sh::test_gate_source_holds_no_literal_token pins it.
+#   1. $SCRUB_GATE_TOKENS      one explicit file. If set it MUST exist.
+#   2. $SCRUB_GATE_TOKENS_DIR  every regular file directly inside it.
+#                              Default: ${XDG_CONFIG_HOME:-~/.config}/scrub-gate/tokens.d
+#                              This is where an overlay stows its list.
+#   3. $SCRUB_GATE_OVERLAYS    <overlay>/scrub-gate/tokens, for every overlay
+#                              directly inside it.
+#                              Default: ~/omarchy_configuration/overlays
+#                              This is where an overlay keeps it before stow.
+#
+# Format: one extended-regex fragment per line. Blank lines and lines whose
+# first non-blank character is # are ignored. Leading and trailing whitespace
+# is stripped, so a fragment may contain spaces but may not start or end with
+# one. The fragments are joined with | in the order read.
+#
+# WITH NO LIST THERE IS NO VERDICT. The gate exits 3 and says so, loudly, on
+# stderr. It must never be possible to mistake "I was given nothing to look
+# for" for "I looked and found nothing" -- that is the failure mode this whole
+# tool exists to prevent, and a publication gate that returns 0 because its
+# list went missing is worse than no gate at all, because it is trusted.
+# Callers that test `scrub-gate x || refuse` therefore fail closed for free.
 # ---------------------------------------------------------------------------
+#
+# The username trap: on this machine the OS username shares its first five
+# characters with the company name, so $HOME and two plugin ids match a
+# substring of one token. A list must never contain a bare prefix that the
+# username satisfies -- it would report thousands of false positives on every
+# absolute path and get the gate switched off. Matching is case-insensitive,
+# so a shouted or title-cased spelling cannot slip through;
+# tests/test_scrub_gate.sh checks the effective list against the real username
+# rather than against a name written down here.
 #
 # Every check captures its producer's output into a variable and tests it with
 # `[[ -n ]]`. It must never be written as `git grep ... | grep -q .`: under
@@ -63,25 +68,62 @@
 # overflow the 64 KiB pipe buffer, which is what makes the race deterministic.
 set -Euo pipefail
 
-# Empty on purpose. It is the only thing standing between the two halves of
-# each token below, and the sole reason this file is not itself a hit.
-_z=''
+_token_files() {
+  local f d
+  if [[ -n "${SCRUB_GATE_TOKENS:-}" ]]; then
+    printf '%s\n' "$SCRUB_GATE_TOKENS"
+    return 0
+  fi
+  d="${SCRUB_GATE_TOKENS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/scrub-gate/tokens.d}"
+  if [[ -d "$d" ]]; then
+    for f in "$d"/*; do [[ -f "$f" ]] && printf '%s\n' "$f"; done
+  fi
+  d="${SCRUB_GATE_OVERLAYS:-$HOME/omarchy_configuration/overlays}"
+  if [[ -d "$d" ]]; then
+    for f in "$d"/*/scrub-gate/tokens; do [[ -f "$f" ]] && printf '%s\n' "$f"; done
+  fi
+  return 0
+}
 
-TOKENS="example${_z}org|example${_z}-ros|example${_z}_ros|example${_z}_nav"
-TOKENS="$TOKENS|example${_z}_hmi|Example${_z}VPN|example${_z}\.com|example${_z}-build"
-TOKENS="$TOKENS|example${_z}-debug|example${_z}-stage|lib${_z}example|Example${_z} Org"
-TOKENS="$TOKENS|ci${_z}\.example|10${_z}\.0\.0|PROJ${_z}-[0-9]|part${_z}nerco"
-TOKENS="$TOKENS|ci-build${_z}-agent"
-
-# The assembled regex, for tests that must scan with the gate's own list rather
-# than a second copy of it that can drift out of step. Reading TOKENS back out
-# of this file with sed is no longer possible, and that is the point.
-if [[ "${1:-}" == "--print-tokens" ]]; then
-  printf '%s\n' "$TOKENS"
-  exit 0
+if [[ -n "${SCRUB_GATE_TOKENS:-}" && ! -f "${SCRUB_GATE_TOKENS:-}" ]]; then
+  echo "scrub-gate: SCRUB_GATE_TOKENS points at no readable file: $SCRUB_GATE_TOKENS" >&2
+  exit 2
 fi
 
-repo="${1:?usage: scrub-gate <repo-path> | scrub-gate --print-tokens}"
+SOURCES=()
+while IFS= read -r _f; do [[ -n "$_f" ]] && SOURCES+=("$_f"); done < <(_token_files)
+
+TOKENS=""
+for _f in ${SOURCES+"${SOURCES[@]}"}; do
+  while IFS= read -r _line || [[ -n "$_line" ]]; do
+    _line="${_line%$'\r'}"
+    _line="${_line#"${_line%%[![:space:]]*}"}"   # lstrip
+    _line="${_line%"${_line##*[![:space:]]}"}"   # rstrip
+    [[ -z "$_line" || "$_line" == '#'* ]] && continue
+    TOKENS="${TOKENS:+$TOKENS|}$_line"
+  done < "$_f"
+done
+
+if [[ -z "$TOKENS" ]]; then
+  {
+    echo "scrub-gate: NO TOKEN LIST FOUND -- NO VERDICT (exit 3)."
+    echo "  This is not a clean result. Nothing was scanned for, so nothing was found."
+    echo "  Looked in:"
+    echo "    \$SCRUB_GATE_TOKENS      = ${SCRUB_GATE_TOKENS:-<unset>}"
+    echo "    \$SCRUB_GATE_TOKENS_DIR  = ${SCRUB_GATE_TOKENS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/scrub-gate/tokens.d}"
+    echo "    \$SCRUB_GATE_OVERLAYS    = ${SCRUB_GATE_OVERLAYS:-$HOME/omarchy_configuration/overlays}/*/scrub-gate/tokens"
+    echo "  The list is supplied by a private overlay; see bin/scrub-tokens.example"
+    echo "  for the format. Until one is present this gate cannot clear anything."
+  } >&2
+  exit 3
+fi
+
+case "${1:-}" in
+  --print-tokens)  printf '%s\n' "$TOKENS"; exit 0 ;;
+  --print-sources) printf '%s\n' ${SOURCES+"${SOURCES[@]}"}; exit 0 ;;
+esac
+
+repo="${1:?usage: scrub-gate <repo-path> | scrub-gate --print-tokens | --print-sources}"
 cd "$repo" || exit 2
 
 status=0
@@ -106,11 +148,11 @@ fi
 
 # `git log -p --all` with NO pathspec. A pathspec here does two damaging
 # things beyond the exclusion itself. It drops whole commits that touch only
-# the listed paths (3 in this repo), and -- the one that matters -- it drops
-# every EMPTY commit's message, because a commit that touches no path survives
-# no path filter. Commit messages are exactly where project names leak
-# ("rollout to <host>", "fix for <issue key>"); Task 10's history rewrite had
-# to add a message callback for that reason. Measured: a commit made with
+# the listed paths, and -- the one that matters -- it drops every EMPTY
+# commit's message, because a commit that touches no path survives no path
+# filter. Commit messages are exactly where project names leak ("rollout to
+# <host>", "fix for <issue key>"); Task 10's history rewrite had to add a
+# message callback for that reason. Measured: a commit made with
 # `--allow-empty -m "rollout to <host>"` was caught by the unfiltered scan and
 # missed by the filtered one. `-p` prints the header, the message and the diff,
 # so one unfiltered pass covers all three.

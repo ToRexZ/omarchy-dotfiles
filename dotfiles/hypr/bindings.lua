@@ -50,18 +50,12 @@ o.bind("SUPER + BACKSPACE", "Omarchy menu", "omarchy-menu toggle")
 -- of the Omarchy menu.
 o.bind("SUPER + R", "Launch apps", "omarchy-menu toggle apps")
 
--- ===== work emulator =====
-
-o.bind(
-  "SUPER + SHIFT + V",
-  "Work emulator",
-  os.getenv("HOME") .. "/omarchy_configuration/emulator/work_emulator_launch.sh"
-)
-
 -- ===== Email scratchpad =====
--- SUPER+E toggles a special workspace named "email", renamed from "emulator".
--- Nothing else referred to the old name: work_emulator_launch.sh above only
--- runs the emulator and never targeted that workspace.
+-- SUPER+E toggles a special workspace named "email". It was called "emulator"
+-- until the work emulator launcher moved to the overlay's bindings.d fragment
+-- along with the rest of the work-specific binds; nothing referred to the old
+-- name except that launcher, which only ran a script and never targeted this
+-- workspace.
 --
 -- tenzin.auto-workspace puts Outlook on special:email at login, and
 -- hide_special_on_workspace_change in Omarchy's looknfeel keeps it out of the
