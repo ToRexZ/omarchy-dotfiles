@@ -32,12 +32,31 @@ set -Euo pipefail
 
 TOKENS='exampleorg|example-ros|example_ros|example_nav|example_hmi|ExampleVPN|example\.com|example-build|example-debug|example-stage|libexample|Example Org|ci\.example|10\.0\.0|PROJ-[0-9]|partnerco|ci-build-agent'
 
+# This gate can never exit 0 against its own repo without this exclusion: the
+# TOKENS list above and tests/test_scrub_gate.sh's fixtures both spell the
+# tokens out as literal strings on purpose (a token you can't write down can't
+# be tested), so a scan of this repo's own tree and history always matches its
+# own definition and its own fixtures -- 18 structural hits, none of them an
+# employer string that leaked, all of them this file and that one quoting the
+# TOKENS regex back at itself.
+#
+# Excluded by pathspec, not by weakening TOKENS: the two files are named
+# explicitly, so a real employer token anywhere else -- including in a
+# *different* test file, or in this same file's own working tree outside these
+# two paths -- still trips the gate. Run against any OTHER repo, neither
+# pathspec matches anything (a strange target repo that happens to ship files
+# at these exact two paths notwithstanding), so nothing is weakened elsewhere.
+# tests/test_scrub_gate.sh's fixtures live under a mktemp dir with no
+# bin/scrub-gate or tests/ of their own, so this exclusion is invisible to
+# every existing test.
+SELF_EXCLUDE=(':(exclude)bin/scrub-gate' ':(exclude)tests/test_scrub_gate.sh')
+
 repo="${1:?usage: scrub-gate <repo-path>}"
 cd "$repo" || exit 2
 
 status=0
 
-tree_hits="$(git grep -IinE "$TOKENS" -- . 2>/dev/null)" || true
+tree_hits="$(git grep -IinE "$TOKENS" -- . "${SELF_EXCLUDE[@]}" 2>/dev/null)" || true
 if [[ -n "$tree_hits" ]]; then
   echo "employer tokens in working tree:" >&2
   printf '%s\n' "$tree_hits" >&2
@@ -47,7 +66,7 @@ fi
 # `git grep` only searches tracked files. A file that exists in the working
 # tree but has not been `git add`ed yet (and is not gitignored) would
 # otherwise sit there silently while the gate reports clean.
-untracked_hits="$(git ls-files --others --exclude-standard -z \
+untracked_hits="$(git ls-files --others --exclude-standard -z -- . "${SELF_EXCLUDE[@]}" \
   | xargs -0 -r grep -HIinE "$TOKENS" -- 2>/dev/null)" || true
 if [[ -n "$untracked_hits" ]]; then
   echo "employer tokens in untracked files:" >&2
@@ -55,7 +74,7 @@ if [[ -n "$untracked_hits" ]]; then
   status=1
 fi
 
-history_hits="$(git log -p --all 2>/dev/null | grep -inE "$TOKENS")" || true
+history_hits="$(git log -p --all -- . "${SELF_EXCLUDE[@]}" 2>/dev/null | grep -inE "$TOKENS")" || true
 if [[ -n "$history_hits" ]]; then
   echo "employer tokens in history:" >&2
   printf '%s\n' "$history_hits" | head -20 >&2

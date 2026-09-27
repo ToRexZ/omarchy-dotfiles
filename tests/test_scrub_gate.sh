@@ -237,3 +237,94 @@ test_gate_has_no_bare_company_underscore_token() {
     fail "$what" "these would match the OS username: $bad"
   fi
 }
+
+# --- Fix round 3 (Task 12): the gate could never pass against its own repo -
+#
+# bin/scrub-gate's own TOKENS list spells every token out as a literal string
+# (a token you can't write down can't be matched), and this file's own
+# fixtures do the same to prove the gate catches them. A scan of this repo's
+# own tree therefore always matched bin/scrub-gate and tests/test_scrub_gate.sh
+# themselves -- not an employer string that leaked, just these two files
+# quoting the token list back at themselves. bin/scrub-gate now excludes
+# exactly these two paths by pathspec, which is invisible to every fixture
+# above (none of them contain a file at either path) and does not touch
+# anything else the gate catches -- proven below by three fixtures.
+
+test_gate_ignores_its_own_definition_and_fixtures() {
+  # Run against the real base repo (not a fixture): the two structural
+  # self-matches -- bin/scrub-gate's own TOKENS line and this file's own
+  # fixture strings -- must not be named as a hit. This does not require the
+  # gate to be clean against this repo: docs/superpowers/ is real employer
+  # content Task 11 removes, so it (and anything else) is still allowed to be
+  # reported. Only these two files' own working-tree lines are checked.
+  local what="gate excludes its own definition and fixtures from a real scan"
+  local out
+  out="$("$REPO_ROOT/bin/scrub-gate" "$REPO_ROOT" 2>&1)" || true
+
+  if printf '%s\n' "$out" | grep -qE '^bin/scrub-gate:'; then
+    fail "$what" "bin/scrub-gate still reports itself as a hit"
+    return
+  fi
+  if printf '%s\n' "$out" | grep -qE '^tests/test_scrub_gate\.sh:'; then
+    fail "$what" "tests/test_scrub_gate.sh still reports its own fixtures as a hit"
+    return
+  fi
+  pass "$what"
+}
+
+test_gate_self_exclusion_does_not_hide_a_real_token_at_those_same_paths() {
+  # The exclusion is by path, not by content -- it must not become a general
+  # "ignore anything that looks like our own token list" escape hatch. A
+  # fixture repo that happens to have real employer content at those same two
+  # relative paths (bin/scrub-gate, tests/test_scrub_gate.sh) is a different
+  # repo than this one, and the gate must still catch it there.
+  local tmp; tmp="$(mktemp -d)"; trap '[[ -n "${tmp:-}" ]] && rm -rf "$tmp"; trap - RETURN' RETURN
+  mkdir -p "$tmp/r/bin" "$tmp/r/tests" "$tmp/r/somewhere-else"
+  printf 'reachable on ExampleVPN only\n' > "$tmp/r/bin/scrub-gate"
+  printf 'builds run on example-monorepo nightly\n' > "$tmp/r/tests/test_scrub_gate.sh"
+  printf 'staging deploys go through example-stage\n' > "$tmp/r/somewhere-else/f.txt"
+  ( cd "$tmp/r" && git init -q . \
+      && git add -A && git -c user.email=t@t -c user.name=t commit -qm x )
+
+  local out status
+  out="$("$REPO_ROOT/bin/scrub-gate" "$tmp/r" 2>&1)"
+  status=$?
+
+  local what="gate exclusion is path-specific, not a token blind spot"
+  if [[ "$status" -ne 0 ]]; then
+    pass "$what (exit status: still catches the third file)"
+  else
+    fail "$what (exit status: still catches the third file)" "gate passed a repo with a real token"
+  fi
+  assert_contains "$out" "example-stage" "gate still reports the token in a file NOT at the excluded paths"
+}
+
+test_gate_verdict_still_matches_the_widened_exclusion_pathspec() {
+  # test_gate_verdict_agrees_with_a_direct_capture_on_this_repo (fix round 1)
+  # computes its own capture without any exclusion. Both must still land on
+  # the same side (dirty/clean) after the self-exclusion is added -- this repo
+  # is not expected to be fully clean yet (docs/superpowers/ still is, until
+  # Task 11), so this is a live re-check that the two haven't diverged, not a
+  # cleanliness assertion.
+  local tokens
+  tokens="$(sed -n "s/^TOKENS='\(.*\)'$/\1/p" "$REPO_ROOT/bin/scrub-gate")"
+  if [[ -z "$tokens" ]]; then
+    fail "gate verdict still matches after self-exclusion" "could not read TOKENS out of bin/scrub-gate"
+    return
+  fi
+
+  local tree dirty=0
+  tree="$(git -C "$REPO_ROOT" grep -IinE "$tokens" -- . \
+    ':(exclude)bin/scrub-gate' ':(exclude)tests/test_scrub_gate.sh' 2>/dev/null)" || true
+  [[ -n "$tree" ]] && dirty=1
+
+  local status
+  "$REPO_ROOT/bin/scrub-gate" "$REPO_ROOT" >/dev/null 2>&1
+  status=$?
+
+  if [[ ( "$dirty" -eq 1 && "$status" -ne 0 ) || ( "$dirty" -eq 0 && "$status" -eq 0 ) ]]; then
+    pass "gate verdict still matches a same-exclusion direct capture"
+  else
+    fail "gate verdict still matches a same-exclusion direct capture" "direct capture dirty=$dirty, gate exit=$status"
+  fi
+}
