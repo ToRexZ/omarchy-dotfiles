@@ -1,0 +1,10 @@
+[tools]
+claude = "latest"
+codex = "latest"
+gh = "latest"
+node = "25.2.1"
+opencode = "latest"
+python = "latest"
+
+[settings.upgrade]
+auto_prune = false

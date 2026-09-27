@@ -1,0 +1,14 @@
+include "/usr/share/omarchy/default/xcompose"
+
+# Identification
+<Multi_key> <space> <n> : "Victor Risager"
+
+# Employer-specific expansions (a work email address, say) are not in this
+# repo. A private overlay stows them into ~/.XCompose.d/, and
+# bin/assemble-xcompose writes an include line for each fragment that is
+# actually there.
+#
+# They are deliberately not `include`d from here: libxkbcommon aborts the
+# entire compose table when an include target is missing, so a hardcoded
+# include would cost a machine with no overlay applied every sequence above,
+# not just the one it cannot find.

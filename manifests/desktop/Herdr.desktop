@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Name=Herdr
+Comment=Herdr
+Exec=omarchy-launch-terminal herdr
+Terminal=false
+Type=Application
+Icon=utilities-terminal
+StartupNotify=true

@@ -8,17 +8,30 @@
 -- read when Omarchy moved Hyprland config from .conf to Lua.
 
 -- o.exec_on_start is the Lua equivalent of `exec-once =`.
---
--- hyprdynamicmonitors used to be started from here. It now runs as a systemd
--- user service instead, which orders it after graphical-session.target, restarts
--- it on failure, and brings along hyprdynamicmonitors-prepare.service (clears
--- stale `monitor=...,disable` lines at boot). Do not add it back here as well,
--- or two daemons will fight over ~/.config/hypr/monitors.conf:
---   systemctl --user enable --now hyprdynamicmonitors.service \
---                                 hyprdynamicmonitors-prepare.service
 
 -- Kept from the old overrides file, still disabled:
 -- o.launch_on_start("cursor")
--- o.exec_on_start(o.launch_webapp("https://exampleorg.atlassian.net/wiki/home"))
--- o.exec_on_start(o.launch_webapp("https://exampleorg.atlassian.net/jira/for-you"))
--- o.exec_on_start(o.launch_webapp("https://bitbucket.org/ExampleOrg/workspace/overview/"))
+
+-- The three work webapp launches that used to sit here (a wiki, an issue
+-- tracker and a git host, all commented out) moved to a private overlay: see
+-- its dotfiles/hypr/autostart.d/ fragment, loaded below.
+
+-- ===== Overlay fragments =====
+-- Same shape as the bindings.d loader in bindings.lua: an overlay stows *.lua
+-- into ~/.config/hypr/autostart.d/ and they run here, in sorted order. With no
+-- overlay applied the directory does not exist and this does nothing.
+
+do
+  local dir = (os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/hypr/autostart.d"
+  local ls = io.popen('ls -1 "' .. dir .. '"/*.lua 2>/dev/null | sort')
+  if ls then
+    for path in ls:lines() do
+      local probe = io.open(path, "r")
+      if probe then
+        probe:close()
+        pcall(dofile, path)
+      end
+    end
+    ls:close()
+  end
+end

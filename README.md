@@ -18,7 +18,6 @@ not carry a `.config` level of its own:
 | In the repo                     | Links into                     | Contents |
 |---------------------------------|--------------------------------|----------|
 | `dotfiles/hypr/`                | `~/.config/hypr/`              | `bindings.lua`, `monitors.lua`, `autostart.lua` |
-| `dotfiles/hyprdynamicmonitors/` | `~/.config/hyprdynamicmonitors` (whole dir) | monitor profiles, one per physical location |
 | `dotfiles/opencode/`            | `~/.config/opencode/`          | `opencode.json` |
 | `dotfiles/herdr/`               | `~/.config/herdr/config.toml`  | terminal workspace manager keymap |
 | `dotfiles/nvim/`                | `~/.config/nvim` (whole dir)   | git submodule, [ToRexZ/nvim-config](https://github.com/ToRexZ/nvim-config) |
@@ -35,8 +34,7 @@ symlinked too, so keep `dotfiles/` free of leftovers.
 Whether a directory arrives as one folded symlink or as file-by-file links is
 decided by whether it already exists in `~/.config` when stow runs, so
 `install-stow-packages.sh` pre-creates the ones that must stay real directories
-(`hypr`, `herdr`, `opencode`) and clears the one that must fold
-(`hyprdynamicmonitors`).
+(`hypr`, `herdr`, `opencode`) and clears the one that must fold (`nvim`).
 
 Omarchy drives Hyprland through Lua: `~/.config/hypr/hyprland.lua` loads
 Omarchy's defaults and then `require`s `hypr.bindings`, `hypr.monitors`,
@@ -46,49 +44,21 @@ bound again.
 
 ## Monitors
 
-Monitor layouts are managed with the **hyprdynamicmonitors TUI**, not by editing
-Hyprland config:
+Monitor layouts are managed by
+[hyprmoncfg](https://github.com/crmne/omarchy-hyprmoncfg), not by editing
+Hyprland config: the `crmne.hyprmoncfg` bar widget edits and saves one profile
+per setup, and `hyprmoncfgd.service` (systemd user) applies the matching one on
+hotplug, lid and wake events.
 
-- **`SUPER+M`** — open the TUI: drag displays, set scale, rotate, mirror, toggle VRR
-- `hyprdynamicmonitors freeze --profile-name <name>` — save the current displays
-  as a new profile for a new desk or meeting room
-
-A profile is a template in `hyprconfigs/` plus a `[profiles.<name>]` entry in
-`config.toml` listing the displays it requires, matched by EDID description. The
-daemon watches for displays being plugged and unplugged, picks the
-highest-scoring matching profile, and renders it to `~/.config/hypr/monitors.conf`.
-
-Because the whole `~/.config/hyprdynamicmonitors` directory is a single stow
-symlink, profiles created with the TUI land in this repo automatically — just
-commit them. `freeze` writes `config_file` as an absolute path; rewrite it to
-`$HOME/...` like the existing entries so the profile resolves for any user.
-
-`~/.config/hypr/monitors.conf` is generated per machine and deliberately **not**
-tracked here.
-
-### How it reaches Hyprland
-
-Two things had to be bridged, because hyprdynamicmonitors predates Omarchy's move
-from `.conf` to Lua:
-
-1. `monitors.conf` used to be picked up by a `source =` line in the now-dead
-   `hyprland.conf`. `monitors.lua` reads it instead and replays each `monitor=`
-   line through `hl.monitor()`, so the generated file is still the single source
-   of truth the TUI and daemon share.
-2. hyprdynamicmonitors applies changes live with `hyprctl keyword monitor`, which
-   the Lua config provider rejects (`keyword can't work with non-legacy
-   parsers`). `post_apply_exec = "hyprctl reload"` in `config.toml` re-runs
-   `hyprland.lua` after each render instead.
-
-The daemon runs as a systemd **user service**, not a Hyprland `exec-once`, so it
-is ordered after `graphical-session.target`, restarts on failure, and pulls in
-`hyprdynamicmonitors-prepare.service` (clears stale `monitor=...,disable` lines
-at boot). Do not also start it from `autostart.lua`, or two daemons will fight
-over `monitors.conf`.
+hyprmoncfg writes `~/.config/hypr/hyprmoncfg-monitors.lua`, which `hyprland.lua`
+loads last, and maintains a wake-settings block at the top of `monitors.lua`.
+Because it rewrites `monitors.lua` in place, `~/.config/hypr/monitors.lua` ends up
+a real file rather than a stow symlink; copy it back here when it changes.
+`monitors.lua` itself only keeps `GDK_SCALE` and a fallback rule for displays no
+profile covers.
 
 ```sh
-systemctl --user status hyprdynamicmonitors
-journalctl --user -u hyprdynamicmonitors -f
+systemctl --user status hyprmoncfgd
 ```
 
 ## nvim

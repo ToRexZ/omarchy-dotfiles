@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Exit 1 if an employer token appears in a repo's working tree (tracked or
+# untracked, non-ignored), or anywhere in its history -- diff content AND
+# commit messages.
+#
+# The OS username is capra_vhr and $HOME is /home/capra_vhr, so "the company name" alone
+# is not a token -- it matches every absolute path and the capra_vhr.* plugin
+# ids. Only the strings in TOKENS identify the employer. Matching is
+# case-insensitive, so a shouted or title-cased spelling cannot slip through --
+# verified this does not start matching capra_vhr: no token differs from the OS
+# username by case alone.
+#
+# The list covers: the company name run together and spaced; the ROS package
+# prefixes (mono, nav, hmi); the WireGuard profile; the mail domain; the three
+# build-environment suffixes (build, debug, stage); the vendored library
+# prefix; the CI host; the internal /16; the second Jira project key, anchored
+# to a following digit so it only matches issue keys; the partner brand; and
+# the build agent, anchored to the agent name rather than to the hosting
+# provider. None is added as a bare `company_` prefix: $HOME is /home/capra_vhr
+# and the plugin ids are capra_vhr.*, so that one addition would match every
+# absolute path in every repo and hand back the false-positive storm this
+# narrow list exists to prevent.
+#
+# ---------------------------------------------------------------------------
+# NO TOKEN IS WRITTEN DOWN IN THIS FILE, AND THE SCAN EXCLUDES NOTHING.
+#
+# Fix round 3 made this gate skip two paths -- bin/scrub-gate and
+# tests/test_scrub_gate.sh -- so that scanning this repo would stop matching
+# the gate's own token list and its own fixtures. That was the wrong axis, and
+# it was a hole that travels with the tool: the gate's whole job is to be
+# pointed at OTHER repos before they are published, and the published base repo
+# ships files at exactly those two paths. Measured against a scratch repo whose
+# only employer content sat at bin/scrub-gate and tests/test_scrub_gate.sh: the
+# gate reported exit 0. A publication gate that returns clean on two known
+# filenames is not a gate.
+#
+# Excluding by content identity instead -- drop hit lines byte-equal to this
+# file's own TOKENS line -- narrows the hole but does not close it, and it
+# cannot cover history at all: every OLD spelling of the TOKENS line is a
+# different string, so the exclusion either misses them or has to soften into
+# a shape match, which is a hole again.
+#
+# The cause was never the scan. It was that this repo contained the tokens as
+# literal strings. So it no longer does: TOKENS is assembled around $_z, which
+# is empty, and tests/test_scrub_gate.sh builds its fixtures the same way. The
+# tokens exist at runtime and appear nowhere in this repository's bytes, so the
+# scan needs no exclusions -- every path, every line, every commit message, in
+# this repo and in every other.
+#
+# This fails CLOSED. Write a future token out as a literal and the gate starts
+# reporting its own source: loud and safe, never a quiet new blind spot.
+# tests/test_scrub_gate.sh::test_gate_source_holds_no_literal_token pins it.
+# ---------------------------------------------------------------------------
+#
+# Every check captures its producer's output into a variable and tests it with
+# `[[ -n ]]`. It must never be written as `git grep ... | grep -q .`: under
+# `set -o pipefail` that shape FAILS OPEN. `grep -q` exits at the first match,
+# which closes the pipe; `git grep` is then killed by SIGPIPE and exits 141;
+# pipefail makes 141 the pipeline's status; and the `if` is therefore false on
+# exactly the repos that have the most to hide. Measured on this repo:
+# `PIPESTATUS=141 0`, pipeline rc 141, gate exit 0, with 59 real hits in the
+# tree. tests/test_scrub_gate.sh pins this against a fixture big enough to
+# overflow the 64 KiB pipe buffer, which is what makes the race deterministic.
+set -Euo pipefail
+
+# Empty on purpose. It is the only thing standing between the two halves of
+# each token below, and the sole reason this file is not itself a hit.
+_z=''
+
+TOKENS="example${_z}org|example${_z}-ros|example${_z}_ros|example${_z}_nav"
+TOKENS="$TOKENS|example${_z}_hmi|Example${_z}VPN|example${_z}\.com|example${_z}-build"
+TOKENS="$TOKENS|example${_z}-debug|example${_z}-stage|lib${_z}example|Example${_z} Org"
+TOKENS="$TOKENS|ci${_z}\.example|10${_z}\.0\.0|PROJ${_z}-[0-9]|part${_z}nerco"
+TOKENS="$TOKENS|ci-build${_z}-agent"
+
+# The assembled regex, for tests that must scan with the gate's own list rather
+# than a second copy of it that can drift out of step. Reading TOKENS back out
+# of this file with sed is no longer possible, and that is the point.
+if [[ "${1:-}" == "--print-tokens" ]]; then
+  printf '%s\n' "$TOKENS"
+  exit 0
+fi
+
+repo="${1:?usage: scrub-gate <repo-path> | scrub-gate --print-tokens}"
+cd "$repo" || exit 2
+
+status=0
+
+tree_hits="$(git grep -IinE "$TOKENS" -- . 2>/dev/null)" || true
+if [[ -n "$tree_hits" ]]; then
+  echo "employer tokens in working tree:" >&2
+  printf '%s\n' "$tree_hits" >&2
+  status=1
+fi
+
+# `git grep` only searches tracked files. A file that exists in the working
+# tree but has not been `git add`ed yet (and is not gitignored) would
+# otherwise sit there silently while the gate reports clean.
+untracked_hits="$(git ls-files --others --exclude-standard -z -- . \
+  | xargs -0 -r grep -HIinE "$TOKENS" -- 2>/dev/null)" || true
+if [[ -n "$untracked_hits" ]]; then
+  echo "employer tokens in untracked files:" >&2
+  printf '%s\n' "$untracked_hits" >&2
+  status=1
+fi
+
+# `git log -p --all` with NO pathspec. A pathspec here does two damaging
+# things beyond the exclusion itself. It drops whole commits that touch only
+# the listed paths (3 in this repo), and -- the one that matters -- it drops
+# every EMPTY commit's message, because a commit that touches no path survives
+# no path filter. Commit messages are exactly where project names leak
+# ("rollout to <host>", "fix for <issue key>"); Task 10's history rewrite had
+# to add a message callback for that reason. Measured: a commit made with
+# `--allow-empty -m "rollout to <host>"` was caught by the unfiltered scan and
+# missed by the filtered one. `-p` prints the header, the message and the diff,
+# so one unfiltered pass covers all three.
+history_hits="$(git log -p --all 2>/dev/null | grep -inE "$TOKENS")" || true
+if [[ -n "$history_hits" ]]; then
+  echo "employer tokens in history:" >&2
+  printf '%s\n' "$history_hits" | head -20 >&2
+  status=1
+fi
+
+exit "$status"

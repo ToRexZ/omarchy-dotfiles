@@ -1,0 +1,49 @@
+# See https://git-scm.com/docs/git-config
+
+[alias]
+	co = checkout
+	br = branch
+	ci = commit
+	st = status
+[init]
+	defaultBranch = master
+[pull]
+	rebase = true 			 # Rebase (instead of merge) on pull
+[push]
+	autoSetupRemote = true   # Automatically set upstream branch on push
+[diff]
+	algorithm = histogram    # Clearer diffs on moved/edited lines
+	colorMoved = plain       # Highlight moved blocks in diffs
+	mnemonicPrefix = true    # More intuitive refs in diff output
+[commit]
+	verbose = true           # Include diff comment in commit message template
+[column]
+	ui = auto 			     # Output in columns when possible
+[branch]
+	sort = -committerdate    # Sort branches by most recent commit first
+[tag]
+	sort = -version:refname  # Sort version numbers as you would expect
+[rerere]
+	enabled = true           # Record and reuse conflict resolutions
+	autoupdate = true        # Apply stored conflict resolutions automatically
+[user]
+	name = Victor Risager
+[credential "https://github.com"]
+	helper = 
+	helper = !/usr/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper = 
+	helper = !/usr/bin/gh auth git-credential
+# The work email address is not in this repo. A private overlay stows it to
+# ~/.gitconfig.d/work-email and the include below picks it up. git silently
+# ignores an include whose file is missing (verified: `git config -f <this>
+# --includes --list` exits 0 and simply has no user.email), so this line is
+# safe on a machine with no overlay applied -- unlike an XCompose include,
+# which is why that half of the split needs bin/assemble-xcompose instead.
+#
+# The path is deliberately not relative. git resolves a relative include.path
+# against the directory of the file doing the including -- ~/.config/git/ here,
+# which is the base repo's own stow target -- so a relative path can never
+# reach an overlay's $HOME fragment.
+[include]
+	path = ~/.gitconfig.d/work-email

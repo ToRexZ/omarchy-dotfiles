@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Print the assembled ~/.XCompose: this repo's base file, then one `include`
+# line per fragment an overlay has stowed into ~/.XCompose.d/.
+#
+# Usage: bin/assemble-xcompose [base-file] [fragment-dir] > ~/.XCompose
+#
+# This is the .XCompose half of the same split shell.json has: base content
+# here, employer content in a private overlay, a named merge that puts them
+# back together. `jq -f overlays/<name>/shell.json.jq` is that merge for
+# shell.json; this script is it for .XCompose.
+#
+# Why the includes are generated rather than committed into home/.XCompose:
+# libxkbcommon aborts the WHOLE compose table when an include target is
+# missing --
+#
+#   $ xkbcli compile-compose --test c1          # c1 includes a missing file
+#   xkbcommon: ERROR: (unknown file):2:9: failed to open included Compose
+#     file "...": No such file or directory
+#   xkbcommon: ERROR: (unknown file):2:9: failed to parse file
+#   ERROR: Couldn't create compose from file: c1
+#   exit=1
+#
+# -- so a hardcoded `include "%H/.XCompose.d/work-email"` in the base file
+# would cost a base-only machine (no overlay, no ~/.XCompose.d) every compose
+# sequence it has, not just the employer one. Git's `include.path` silently
+# ignores a missing file and is therefore wired directly into
+# dotfiles/git/config; compose's is not, and cannot be.
+set -Euo pipefail
+
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE="${1:-$REPO_ROOT/home/.XCompose}"
+FRAG_DIR="${2:-$HOME/.XCompose.d}"
+
+[[ -f "$BASE" ]] || { echo "no base .XCompose at $BASE" >&2; exit 2; }
+cat -- "$BASE"
+
+shopt -s nullglob
+frags=("$FRAG_DIR"/*)
+[[ ${#frags[@]} -gt 0 ]] || exit 0
+
+printf '\n# Overlay fragments, from %s\n' "$FRAG_DIR"
+for f in "${frags[@]}"; do
+  [[ -f "$f" ]] || continue
+  printf 'include "%s"\n' "$f"
+done

@@ -10,24 +10,15 @@
 --
 -- See what is currently bound: omarchy menu keybindings --print
 
--- ===== Work web apps =====
+-- ===== Personal web apps =====
 -- These take over keys Omarchy assigns to its own preinstalled apps.
-
-hl.unbind("SUPER + SHIFT + G") -- was: Signal
-o.bind("SUPER + SHIFT + G", "Bitbucket", { webapp = "https://bitbucket.org/ExampleOrg/workspace/overview/" })
-
--- SUPER+SHIFT+T is free in Omarchy's defaults, so no unbind is needed.
-o.bind("SUPER + SHIFT + T", "Jira", { webapp = "https://exampleorg.atlassian.net/jira/software/c/projects/PROJ/boards/51" })
-
-hl.unbind("SUPER + SHIFT + O") -- was: Obsidian
-o.bind("SUPER + SHIFT + O", "Confluence", { webapp = "https://exampleorg.atlassian.net/wiki/home" })
-
-hl.unbind("SUPER + SHIFT + W") -- was: Omawrite
-o.bind(
-  "SUPER + SHIFT + W",
-  "Webcams",
-  { webapp = "https://unifi.ui.com/consoles/0CEA1412855100000000085F228E0000000008D11CE00000000066FE3236:2131503338/protect/dashboard/all" }
-)
+--
+-- Work web apps are not in this repo. An issue tracker, a wiki, a git host and
+-- the office cameras used to sit here on SUPER+SHIFT+G/T/O/W; they now live in
+-- a private overlay, which stows a fragment into ~/.config/hypr/bindings.d/
+-- (see the loader further down). Those four keys keep Omarchy's defaults
+-- unless an overlay is applied, and the fragment does its own hl.unbind()
+-- before rebinding them.
 
 hl.unbind("SUPER + SHIFT + A") -- was: ChatGPT
 o.bind("SUPER + SHIFT + A", "Claude", { webapp = "https://claude.ai/new" })
@@ -66,7 +57,17 @@ o.bind(
   "Work emulator",
   os.getenv("HOME") .. "/omarchy_configuration/emulator/work_emulator_launch.sh"
 )
-o.bind("SUPER + E", "Toggle emulator workspace", hl.dsp.workspace.toggle_special("emulator"))
+
+-- ===== Email scratchpad =====
+-- SUPER+E toggles a special workspace named "email", renamed from "emulator".
+-- Nothing else referred to the old name: work_emulator_launch.sh above only
+-- runs the emulator and never targeted that workspace.
+--
+-- tenzin.auto-workspace puts Outlook on special:email at login, and
+-- hide_special_on_workspace_change in Omarchy's looknfeel keeps it out of the
+-- way until this key brings it back.
+
+o.bind("SUPER + E", "Toggle email workspace", hl.dsp.workspace.toggle_special("email"))
 
 -- ===== Lock screen =====
 
@@ -126,9 +127,34 @@ hl.unbind("PRINT") -- was: Screenshot
 o.bind("PRINT", "Screenshot", "omarchy-capture-screenshot smart")
 o.bind("SHIFT + PRINT", "Screenshot to clipboard", "omarchy-capture-screenshot smart copy")
 
--- ===== Monitor config TUI =====
+-- ===== Overlay fragments =====
+-- Employer keybindings are not in this repo -- they arrive as *.lua fragments
+-- in ~/.config/hypr/bindings.d/, stowed there by a private overlay, and are
+-- loaded here in sorted order so a fragment can unbind and rebind anything set
+-- above it.
+--
+-- With no overlay applied the directory does not exist and this block does
+-- nothing. Nothing is dofile()'d that was not just opened successfully, and
+-- each fragment runs under pcall, so a missing, unreadable or broken fragment
+-- costs that fragment rather than everything after it.
+--
+-- This sits above the per-monitor-workspaces block on purpose: that plugin
+-- unbinds and rebinds SUPER+1..0 and SUPER+TAB and has to keep going last.
 
-o.bind("SUPER + M", "Monitor config", "omarchy-launch-tui hyprdynamicmonitors tui")
+do
+  local dir = (os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/hypr/bindings.d"
+  local ls = io.popen('ls -1 "' .. dir .. '"/*.lua 2>/dev/null | sort')
+  if ls then
+    for path in ls:lines() do
+      local probe = io.open(path, "r")
+      if probe then
+        probe:close()
+        pcall(dofile, path)
+      end
+    end
+    ls:close()
+  end
+end
 
 -- ===== Per-monitor workspaces =====
 -- Keys for the mmsbrggr.per-monitor-workspaces bar widget, which gives every

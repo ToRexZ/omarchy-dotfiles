@@ -23,16 +23,14 @@ PACKAGE="dotfiles"
 PACKAGE_ROOT="$SCRIPT_DIR/$PACKAGE"
 
 # Paths this repo claims as a whole directory rather than file by file. stow only
-# folds a directory into a single symlink when the target does not already exist,
-# and the fold is what makes profiles the hyprdynamicmonitors TUI creates land
-# inside the repo instead of loose in ~/.config.
+# folds a directory into a single symlink when the target does not already exist.
 #
-# nvim is a git submodule and has to fold for the same reason and one more: the
-# fold is what keeps ~/.config/nvim a single directory with its own .git, so it
-# stays a working checkout of ToRexZ/nvim-config that can be committed from
-# either path. Linked file by file it would be a scatter of symlinks with no
-# repo, and lazy-lock.json updates would land outside git.
-DIR_CLAIMS=("hyprdynamicmonitors" "nvim")
+# nvim is a git submodule and has to fold: the fold is what keeps ~/.config/nvim
+# a single directory with its own .git, so it stays a working checkout of
+# ToRexZ/nvim-config that can be committed from either path. Linked file by file
+# it would be a scatter of symlinks with no repo, and lazy-lock.json updates
+# would land outside git.
+DIR_CLAIMS=("nvim")
 
 # The inverse: paths that must stay real directories so stow links their
 # contents file by file. herdr keeps its sockets, logs and session.json beside
