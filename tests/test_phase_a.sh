@@ -802,18 +802,35 @@ test_nvim_work_repo_exists_and_is_private() {
 # The machine has 19 plugin checkouts (not 16, and not the 18 the brief
 # expected -- always re-derive from $HOME/.config/omarchy/plugins, never trust
 # a stated count). bin/sync-plugins refuses to record a pin no remote can
-# currently serve, so these two are read straight from what it actually wrote,
-# not from what it was hoped to write. A shrinking manifest is the intended
-# failure mode when a real plugin regresses (gains unpushed commits, loses its
-# origin remote, drifts behind upstream past what a tip-only check can
-# confirm) -- see task-12-report.md for the five real cases this caught here.
+# currently serve, so these are read straight from what it actually wrote, not
+# from what it was hoped to write. A shrinking manifest is the intended failure
+# mode when a real plugin regresses: it gains a commit that was never pushed,
+# or loses its origin remote. Drifting BEHIND upstream is not such a regression
+# and no longer refuses -- a commit in the history of a ref the remote serves
+# is reachable, and treating it otherwise was a defect in the tool.
 
 test_every_installed_plugin_is_in_the_manifest() {
+  # Red while any installed plugin cannot be reinstalled from a remote. That
+  # is the point: the manifest exists so a fresh machine can rebuild this one,
+  # and a plugin whose HEAD lives only on this laptop breaks that promise.
+  # The gap is reported with its cause so the red state is actionable rather
+  # than mysterious -- never allowlisted, because an allowlist would turn a
+  # real "you would lose this plugin" into a green tick.
   local manifest="$REPO_ROOT/manifests/plugins.toml" missing=""
   for d in "$HOME"/.config/omarchy/plugins/*/; do
     local id; id="$(jq -r .id "$d/manifest.json" 2>/dev/null)"
     [[ -n "$id" && "$id" != null ]] || continue
-    grep -q "id = \"$id\"" "$manifest" 2>/dev/null || missing+="$id "
+    grep -q "id = \"$id\"" "$manifest" 2>/dev/null && continue
+    local why="not recorded"
+    local url; url="$(git -C "$d" remote get-url origin 2>/dev/null)" || url=""
+    if [[ -z "$url" ]]; then
+      why="no origin remote"
+    elif [[ -n "$(_github_reachable 2>/dev/null; echo $?)" ]] \
+      && ! "$REPO_ROOT/bin/sync-plugins" --verify "$d" "$url" \
+           "$(git -C "$d" rev-parse HEAD 2>/dev/null)" >/dev/null 2>&1; then
+      why="HEAD $(git -C "$d" rev-parse --short HEAD 2>/dev/null) is on no ref $url serves (push it, then re-run bin/sync-plugins)"
+    fi
+    missing+="$id ($why); "
   done
   if [[ -z "$missing" ]]; then
     pass "every installed plugin is in plugins.toml"
@@ -823,18 +840,24 @@ test_every_installed_plugin_is_in_the_manifest() {
 }
 
 test_every_pin_is_reachable_from_its_remote() {
+  # "Reachable" means a clone of $url can produce $commit -- which is true for
+  # any commit in the history of a ref the remote serves, not only for the
+  # handful of commits that are ref tips today. An earlier form of this test
+  # (and of bin/sync-plugins) compared tips with `ls-remote | grep -q`, and so
+  # called two perfectly fetchable pins unreachable merely because upstream had
+  # moved past them: agx.screen-time is 286 commits behind its remote's main,
+  # bobbynicholas.omaland 3 behind, and both are genuine ancestors of it.
+  #
+  # The check is delegated to `bin/sync-plugins --verify` rather than
+  # reimplemented here, on purpose. Tip-match-then-fetch-then-merge-base is
+  # subtle enough that a second copy would drift out of step with the generator
+  # silently, and a test that disagrees with the tool it is checking is worse
+  # than no test -- it just tells you one of the two is wrong.
+  #
   # "Cannot check" (egress down) must never be conflated with "check failed"
   # (egress fine, this specific pin doesn't resolve) -- same shape as
   # _github_reachable/_gh_can_check above: a known-public endpoint is probed
   # once for the whole test, and only a failure *there* is a skip.
-  #
-  # The brief's original form of this test read the local fallback from
-  # "$HOME/.config/omarchy/plugins" itself (the parent of every checkout, and
-  # not a git repository) rather than from the individual plugin's own
-  # directory, so it could never actually succeed -- id is parsed alongside
-  # url/commit here specifically so the fallback can reach the right
-  # checkout's own objects (id and the plugin's directory name are the same
-  # string for every plugin currently installed).
   local manifest="$REPO_ROOT/manifests/plugins.toml"
   local what="every recorded pin is reachable from its remote"
   local why
@@ -843,12 +866,17 @@ test_every_pin_is_reachable_from_its_remote() {
     return
   fi
 
-  local bad="" seen=0 id url commit
+  local bad="" seen=0 id url commit dir
   while read -r id url commit; do
     [[ -n "$id" && -n "$url" && -n "$commit" ]] || continue
     seen=$((seen + 1))
-    git ls-remote "$url" 2>/dev/null | grep -q "$commit" \
-      || git -C "$HOME/.config/omarchy/plugins/$id" cat-file -e "${commit}^{commit}" 2>/dev/null \
+    # The plugin checkout is the object donor --verify needs to answer the
+    # ancestry question: the pin lives in its objects, the remote's newer
+    # history is fetched into a throwaway, and merge-base needs both together.
+    # id and the checkout's directory name are the same string for every
+    # plugin currently installed.
+    dir="$HOME/.config/omarchy/plugins/$id"
+    "$REPO_ROOT/bin/sync-plugins" --verify "$dir" "$url" "$commit" >/dev/null 2>&1 \
       || bad+="$id@${commit:0:8} "
   done < <(awk -F'"' '/^id = /{i=$2} /^url = /{u=$2} /^commit = /{print i, u, $2}' "$manifest")
 
@@ -858,6 +886,72 @@ test_every_pin_is_reachable_from_its_remote() {
     pass "$what ($seen pins)"
   else
     fail "$what" "unreachable: $bad"
+  fi
+}
+
+test_ancestry_check_accepts_a_behind_pin_and_refuses_an_unpushed_one() {
+  # Both halves of the reachability rule, against a bare remote created with
+  # `git init --bare` in a throwaway directory -- no network, no GitHub, no
+  # write access to anything real, so this proves the rule deterministically
+  # whether or not egress is up.
+  #
+  # The "behind" fixture is the shape bin/sync-plugins used to get WRONG:
+  # a checkout parked on an older commit that the remote has since built on.
+  # The "unpushed" fixture is the shape it must still refuse, and is the same
+  # shape as the real mryll.meteobar / wg-omarchy findings.
+  local what="ancestry check accepts a pin behind the remote tip, refuses an unpushed one"
+  local scratch; scratch="$(mktemp -d)" || { fail "$what" "mktemp failed"; return; }
+  local verify="$REPO_ROOT/bin/sync-plugins"
+  local remote="$scratch/remote.git"
+  local behind unpushed err=""
+
+  (
+    set -e
+    export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
+    export GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
+    git init --quiet --bare -b main "$remote"
+    git clone --quiet "$remote" "$scratch/seed"
+    cd "$scratch/seed"
+    for n in 1 2 3; do
+      echo "$n" > file.txt
+      git add file.txt
+      git commit --quiet -m "commit $n"
+    done
+    git push --quiet origin main
+  ) >/dev/null 2>&1 || { rm -rf "$scratch"; fail "$what" "could not build the local fixture remote"; return; }
+
+  # A clone parked two commits behind the remote's tip: a true ancestor.
+  git clone --quiet "$remote" "$scratch/behind" >/dev/null 2>&1
+  git -C "$scratch/behind" checkout --quiet HEAD~2 >/dev/null 2>&1
+  behind="$(git -C "$scratch/behind" rev-parse HEAD)"
+
+  # A clone with one further commit that was never pushed back.
+  git clone --quiet "$remote" "$scratch/unpushed" >/dev/null 2>&1
+  (
+    cd "$scratch/unpushed"
+    export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
+    export GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
+    echo local > file.txt
+    git add file.txt
+    git commit --quiet -m "never pushed"
+  ) >/dev/null 2>&1
+  unpushed="$(git -C "$scratch/unpushed" rev-parse HEAD)"
+
+  "$verify" --verify "$scratch/behind" "$remote" "$behind" >/dev/null 2>&1 \
+    || err+="rejected a commit that IS an ancestor of the remote tip; "
+  "$verify" --verify "$scratch/unpushed" "$remote" "$unpushed" >/dev/null 2>&1 \
+    && err+="accepted a commit that was never pushed; "
+
+  # The throwaway object store the ancestry probe builds must not leave a
+  # trace in the checkout it borrowed objects from.
+  [[ -z "$(git -C "$scratch/behind" status --porcelain 2>/dev/null)" ]] \
+    || err+="the verify pass dirtied the checkout it read from; "
+
+  rm -rf "$scratch"
+  if [[ -z "$err" ]]; then
+    pass "$what"
+  else
+    fail "$what" "$err"
   fi
 }
 

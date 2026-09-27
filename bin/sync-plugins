@@ -3,52 +3,77 @@
 # $PLUGINS_DIR (default: ~/.config/omarchy/plugins). Phase B's bootstrap reads
 # this file to reinstall every plugin on a fresh machine.
 #
-# The whole point of this tool is the refusal, not the manifest: a plugin
-# whose HEAD commit no remote can currently serve is reported and left out,
-# never recorded with a guess. A manifest that silently names an unpushed SHA
-# looks like a guarantee ("clone this and you have what I have") while being
-# none -- worse than no manifest, because nobody re-checks a file that already
-# claims to be true. See task-12-report.md for concrete cases this caught on
-# this machine: a plugin with no 'origin' remote at all, two with unpushed
-# local commits, and two whose clones have drifted behind their upstream far
-# enough that a tip-only check can no longer vouch for them.
+# The point of this tool is the refusal, not the manifest: a plugin whose HEAD
+# commit no remote can serve is reported and left out, never recorded with a
+# guess. A manifest that silently names an unpushed SHA looks like a guarantee
+# ("clone this and you have what I have") while being none -- worse than no
+# manifest, because nobody re-checks a file that already claims to be true.
 #
-# Reachability is decided ONLY by whether $commit is the exact tip of some ref
-# (branch or tag) `git ls-remote "$url"` currently advertises -- the same
-# thing tests/test_phase_a.sh's test_every_pin_is_reachable_from_its_remote
-# checks afterwards, so a pin this script accepts is one that test cannot then
-# disagree with. This is deliberately conservative: an older commit that is a
-# true ancestor of the remote's current tip, but is not itself any ref's tip,
-# cannot be told apart here from one that was never pushed at all -- ls-remote
-# only advertises ref tips, never history. `git fetch --dry-run <url>
-# <commit>` was tried as a fix for that gap and rejected: it reports success
-# for a commit that exists ONLY in the local object store, never contacting
-# the remote to check, because git resolves an already-local object without
-# asking -- verified against wg-omarchy and mryll.meteobar's genuinely-unpushed
-# commits below, both of which it falsely cleared. A verification method that
-# can't tell "pushed" from "not pushed" is worse than none, so it was not used.
+# REACHABILITY IS ANCESTRY, NOT TIP EQUALITY.
+# The question a bootstrap actually asks is "can a clone of $url produce
+# $commit?", and the answer is yes for any commit in the history of a ref the
+# remote serves -- not merely for the handful of commits that happen to be ref
+# tips today. An earlier version of this script compared tips, and refused two
+# plugins (agx.screen-time, bobbynicholas.omaland) whose checkouts are simply a
+# few commits behind an upstream that moved on. Both are perfectly fetchable.
+# That was a defect in the tool, not a finding about the plugins.
 #
-# Network reads only, and read-only in effect: `git ls-remote` against each
-# plugin's own origin, nothing else. No fetch (confirmed above to be
-# untrustworthy for this anyway), no push, no repo creation -- this script
-# never touches a remote's state or a plugin's local object store.
+# So the check is two-stage, cheapest first:
+#
+#   1. `git ls-remote "$url"` -- if $commit is the exact tip of some ref, done,
+#      no fetch at all. This is the common case and costs one round trip.
+#   2. Otherwise, fetch the remote's heads and tags into a THROWAWAY bare repo
+#      whose objects/info/alternates points at the plugin checkout's own object
+#      store, then ask `git merge-base --is-ancestor $commit $tip` for each tip
+#      in turn. The alternate is what makes this answerable: the pin lives in
+#      the plugin's objects, the remote's new history lives in the throwaway,
+#      and merge-base needs both in one object database.
+#
+# The throwaway is the whole reason this is safe to do. Fetching into the
+# plugin checkout itself would answer the same question, but it would also
+# write objects and move origin/* refs inside a directory this script has no
+# business modifying. An alternate is read-only towards the plugin: nothing is
+# written under $PLUGINS_DIR, and the throwaway is removed on the way out.
+#
+# `git fetch --dry-run <url> <commit>` was tried first and rejected: it reports
+# success for a commit that exists ONLY in the local object store, because git
+# resolves an already-local object without asking the remote. It cleared
+# wg-omarchy's and mryll.meteobar's genuinely-unpushed commits, so it cannot
+# tell "pushed" from "not pushed" and is not used. A real fetch followed by a
+# real ancestry test has no such blind spot: if the remote will not serve the
+# history, the fetch brings back tips $commit is not an ancestor of, and the
+# pin is refused -- which is exactly what still happens to a genuinely
+# unpushed commit (see tests/test_phase_a.sh's offline fixture, which proves
+# both halves: an ancestor pin is accepted, an unpushed pin is refused).
+#
+# refs/pull/* is ignored on purpose. GitHub advertises it, but a plain clone
+# does not fetch it, so a pin reachable only through a PR ref is not something
+# a bootstrap can reproduce with the 'url' + 'branch' + 'commit' this manifest
+# records.
+#
+# Network reads only: ls-remote, and a fetch into a throwaway. No push, no repo
+# creation, no write to any remote and no write to any plugin checkout.
 #
 # "Cannot check" (egress is down) is never conflated with "check failed"
 # (egress is fine, this remote specifically didn't answer) -- same shape as
 # tests/test_phase_a.sh's _gh_can_check / _github_reachable: a known-public,
 # always-on endpoint is probed once per run, not once per plugin, and only a
 # failure *there* is treated as "cannot check". When egress is down, a pin is
-# still recorded if -- and only if -- this checkout's own remote-tracking
-# data (cached locally from a previous, already-completed fetch; no network
-# now) already shows the commit on an origin/* ref, and it is reported to
-# stderr as UNVERIFIED rather than folded in silently. When egress is up but
-# the check still fails, that is refused outright, the same as "not pushed".
+# still recorded if -- and only if -- this checkout's own remote-tracking data
+# (cached locally from a previous, already-completed fetch; no network now)
+# already shows the commit on an origin/* ref, and it is reported to stderr as
+# UNVERIFIED rather than folded in silently. When egress is up but the check
+# still fails, that is refused outright, the same as "not pushed".
 set -Euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${SYNC_PLUGINS_OUT:-$REPO_ROOT/manifests/plugins.toml}"
 PLUGINS_DIR="${PLUGINS_DIR:-$HOME/.config/omarchy/plugins}"
-mkdir -p "$(dirname "$OUT")"
+
+# Every throwaway object store this run creates, removed on any exit path.
+_SCRATCH_DIRS=()
+_cleanup() { [[ "${#_SCRATCH_DIRS[@]}" -gt 0 ]] && rm -rf -- "${_SCRATCH_DIRS[@]}"; return 0; }
+trap _cleanup EXIT
 
 # A public, unauthenticated, always-on repo. A failure here means "egress is
 # down", not "this plugin's remote is unreachable" -- probed at most once.
@@ -56,15 +81,127 @@ _egress_up() {
   timeout 8 git ls-remote https://github.com/git/git.git HEAD >/dev/null 2>&1
 }
 
+# Only refs a plain clone can reproduce: the default branch (HEAD), branches
+# and tags. refs/pull/* and anything else advertised is dropped.
+_clonable_refs() {
+  awk '$2 == "HEAD" || $2 ~ /^refs\/(heads|tags)\// { print $1, $2 }'
+}
+
+# Stage 1: $commit is itself the tip of a clonable ref. Prints that ref name.
+# ls-remote lists HEAD first, so if the pin is the current default tip the
+# HEAD pseudo-ref wins over any branch pointing at the same sha.
+_tip_ref() {
+  local commit="$1"
+  _clonable_refs | awk -v c="$commit" '$1 == c { print $2; exit }'
+}
+
+# Stage 2: $commit is an ancestor of the tip of some clonable ref. Prints that
+# ref name, preferring HEAD (the default branch) so an ordinary "clone, then
+# check out this commit" pin does not acquire a redundant 'branch' field.
+#
+# $1 plugin checkout (object donor, never written to), $2 url, $3 commit,
+# $4 ls-remote output. Non-zero if the fetch fails or nothing contains it.
+_ancestor_ref() {
+  local dir="$1" url="$2" commit="$3" ls_out="$4"
+  local objdir tmp ref sha
+
+  objdir="$(git -C "$dir" rev-parse --git-path objects 2>/dev/null)" || return 1
+  [[ "$objdir" == /* ]] || objdir="$dir/$objdir"
+  [[ -d "$objdir" ]] || return 1
+
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/sync-plugins-ancestry.XXXXXX")" || return 1
+  _SCRATCH_DIRS+=("$tmp")
+  git init --quiet --bare "$tmp" >/dev/null 2>&1 || return 1
+  printf '%s\n' "$objdir" > "$tmp/objects/info/alternates"
+
+  # Read-only toward $dir: every object fetched lands in $tmp.
+  timeout 300 git -C "$tmp" fetch --quiet "$url" \
+    '+refs/heads/*:refs/remotes/src/*' '+refs/tags/*:refs/tags/*' \
+    >/dev/null 2>&1 || return 1
+
+  # HEAD first, then branches, then tags -- and for an annotated tag the
+  # peeled '^{}' line, which is the commit the tag actually resolves to.
+  while read -r sha ref; do
+    [[ -n "$sha" && -n "$ref" ]] || continue
+    git -C "$tmp" cat-file -e "${sha}^{commit}" 2>/dev/null || continue
+    if git -C "$tmp" merge-base --is-ancestor "$commit" "$sha" 2>/dev/null; then
+      printf '%s\n' "${ref%'^{}'}"
+      return 0
+    fi
+  done < <(_clonable_refs <<<"$ls_out")
+
+  return 1
+}
+
+# The ref name a pin is reachable through, or non-zero. Prints "<how> <ref>".
+# Single implementation on purpose: tests call this through --verify rather
+# than reimplementing the two stages and drifting out of step with them.
+_reachable_ref() {
+  local dir="$1" url="$2" commit="$3" ls_out="$4" ref
+
+  if ref="$(_tip_ref "$commit" <<<"$ls_out")" && [[ -n "$ref" ]]; then
+    printf 'tip %s\n' "$ref"
+    return 0
+  fi
+  if ref="$(_ancestor_ref "$dir" "$url" "$commit" "$ls_out")" && [[ -n "$ref" ]]; then
+    printf 'ancestor %s\n' "$ref"
+    return 0
+  fi
+  return 1
+}
+
+# 'branch' is recorded only when cloning the default branch and checking out
+# 'commit' would NOT reproduce this checkout. A commit on (or in the history
+# of) the default branch needs no branch field; anything else does.
+_branch_for_ref() {
+  local ref="$1" ls_out="$2" default_sha ref_sha
+
+  [[ "$ref" == "HEAD" ]] && { printf '%s' ""; return 0; }
+
+  default_sha="$(awk '$2 == "HEAD" { print $1; exit }' <<<"$ls_out")"
+  ref_sha="$(awk -v r="$ref" '$2 == r { print $1; exit }' <<<"$ls_out")"
+  if [[ -n "$default_sha" && "$ref_sha" == "$default_sha" ]]; then
+    printf '%s' ""
+    return 0
+  fi
+
+  # An annotated tag is advertised twice: 'refs/tags/x' (the tag object) and
+  # 'refs/tags/x^{}' (the commit it peels to). The peeled line is the one that
+  # matches a commit pin, but '^{}' is not part of the name you check out.
+  local name="${ref%'^{}'}"
+  case "$name" in
+    refs/heads/*) printf '%s' "${name#refs/heads/}" ;;
+    refs/tags/*)  printf '%s' "${name#refs/tags/}" ;;
+    *)            printf '%s' "$name" ;;
+  esac
+}
+
+# --verify <plugin-dir> <url> <commit>: exit 0 and print "<how> <ref>" if a
+# clone of <url> can produce <commit>, exit 1 otherwise. Used by
+# tests/test_phase_a.sh so the test and the generator share one checker.
+if [[ "${1:-}" == "--verify" ]]; then
+  [[ $# -eq 4 ]] || { echo "usage: sync-plugins --verify <plugin-dir> <url> <commit>" >&2; exit 2; }
+  _v_dir="$2"; _v_url="$3"; _v_commit="$4"
+  _v_ls="$(timeout 30 git ls-remote "$_v_url" 2>/dev/null)" || { echo "ls-remote failed: $_v_url" >&2; exit 1; }
+  _reachable_ref "$_v_dir" "$_v_url" "$_v_commit" "$_v_ls" || exit 1
+  exit 0
+fi
+
+mkdir -p "$(dirname "$OUT")"
+
 {
   echo "# Generated by bin/sync-plugins. Do not hand-edit -- re-run the"
   echo "# script instead; it will refuse anything it can't re-verify."
   echo "#"
-  echo "# 'branch' is present only when 'commit' is not the tip of the"
-  echo "# remote's default branch -- cloning default and checking out"
-  echo "# 'commit' alone would not reproduce what's actually installed here."
-  echo "# It may hold a tag name instead of a branch name; either checks out"
-  echo "# with a plain 'git checkout <branch>' after a full clone."
+  echo "# Every 'commit' below is reachable from its 'url': either it is the"
+  echo "# tip of a ref the remote serves, or it is an ancestor of one, which"
+  echo "# is what a bootstrap actually needs to check it out after a clone."
+  echo "#"
+  echo "# 'branch' is present only when 'commit' is neither on nor behind the"
+  echo "# tip of the remote's default branch -- cloning default and checking"
+  echo "# out 'commit' alone would not reproduce what's actually installed"
+  echo "# here. It may hold a tag name instead of a branch name; either checks"
+  echo "# out with a plain 'git checkout <branch>' after a full clone."
   echo
 } > "$OUT"
 
@@ -110,7 +247,7 @@ for dir in "$PLUGINS_DIR"/*/; do
 
   ls_out=""
   live_ok=0
-  if ls_out="$(timeout 10 git ls-remote "$url" 2>/dev/null)"; then
+  if ls_out="$(timeout 30 git ls-remote "$url" 2>/dev/null)"; then
     live_ok=1
   fi
 
@@ -122,24 +259,14 @@ for dir in "$PLUGINS_DIR"/*/; do
       status=1; refused_ids+=("$id"); continue
     fi
 
-    # First exact match, in the order ls-remote prints (HEAD, then heads,
-    # then everything else) -- so if $commit is the current default tip, the
-    # "HEAD" pseudo-ref line wins over any other ref pointing at the same sha.
-    match="$(awk -v c="$commit" '$1==c{print $2; exit}' <<<"$ls_out")"
-    if [[ -z "$match" ]]; then
-      echo "REFUSED $id: $commit is not the tip of any ref $url currently serves -- not pushed, or the clone has drifted behind upstream past what a tip-only check can confirm" >&2
+    if ! verdict="$(_reachable_ref "$dir" "$url" "$commit" "$ls_out")"; then
+      echo "REFUSED $id: $commit is not the tip of, nor an ancestor of the tip of, any branch or tag $url serves -- not pushed" >&2
       status=1; refused_ids+=("$id"); continue
     fi
-
-    case "$match" in
-      HEAD) branch="" ;;
-      refs/heads/*) branch="${match#refs/heads/}" ;;
-      refs/tags/*)
-        branch="${match#refs/tags/}"
-        branch="${branch%'^{}'}"
-        ;;
-      *) branch="$match" ;;
-    esac
+    how="${verdict%% *}"
+    ref="${verdict#* }"
+    branch="$(_branch_for_ref "$ref" "$ls_out")"
+    echo "ok $id: $commit reachable as $how of $ref" >&2
   else
     if [[ "$egress_checked" -eq 0 ]]; then
       egress_checked=1
@@ -148,9 +275,9 @@ for dir in "$PLUGINS_DIR"/*/; do
 
     if [[ "$egress_ok" -eq 0 ]]; then
       local_ref="$(git -C "$dir" for-each-ref --format='%(refname)' \
-        --points-at="$commit" 'refs/remotes/origin/*' 2>/dev/null | head -1)"
+        --contains="$commit" 'refs/remotes/origin/*' 2>/dev/null | head -1)"
       if [[ -z "$local_ref" ]]; then
-        echo "REFUSED $id: could not reach $url (egress appears down) and no local remote-tracking ref already holds $commit -- cannot confirm any remote can serve this pin" >&2
+        echo "REFUSED $id: could not reach $url (egress appears down) and no local remote-tracking ref already contains $commit -- cannot confirm any remote can serve this pin" >&2
         status=1; refused_ids+=("$id"); continue
       fi
       b="${local_ref#refs/remotes/origin/}"
@@ -159,7 +286,7 @@ for dir in "$PLUGINS_DIR"/*/; do
       if [[ -z "$local_default" || "$b" != "$local_default" ]]; then
         branch="$b"
       fi
-      echo "UNVERIFIED $id: could not reach $url (egress appears down); recording $commit because a local remote-tracking ref (origin/$b, from a previous fetch) already holds it -- re-run sync-plugins once egress returns to get a live verification" >&2
+      echo "UNVERIFIED $id: could not reach $url (egress appears down); recording $commit because a local remote-tracking ref (origin/$b, from a previous fetch) already contains it -- re-run sync-plugins once egress returns to get a live verification" >&2
       unverified_ids+=("$id")
     else
       echo "REFUSED $id: egress is up but $url could not be reached (bad URL, revoked access, or the repo is gone) -- refusing rather than guessing" >&2
