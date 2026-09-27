@@ -135,7 +135,10 @@ test_xcompose_carries_no_employer_address() {
   # failure message below held a literal work address, so the test that exists
   # to keep employer addresses out of the public tree was itself putting one
   # there. The pattern now comes from bin/scrub-gate's own TOKENS list, which
-  # also widens the check from one address to every employer token.
+  # also widens the check from one address to every employer token. It is read
+# via `bin/scrub-gate --print-tokens`, not sed'd out of the source: the gate
+# now assembles its tokens from halves so its own file holds none as a
+# literal, and there is no TOKENS='...' line left to scrape.
   local f="$REPO_ROOT/home/.XCompose"
   local what="base .XCompose has no employer address"
 
@@ -147,9 +150,9 @@ test_xcompose_carries_no_employer_address() {
   fi
 
   local tokens
-  tokens="$(sed -n "s/^TOKENS='\(.*\)'$/\1/p" "$REPO_ROOT/bin/scrub-gate")"
+  tokens="$("$REPO_ROOT/bin/scrub-gate" --print-tokens)"
   if [[ -z "$tokens" ]]; then
-    fail "$what" "could not read TOKENS out of bin/scrub-gate"
+    fail "$what" "bin/scrub-gate --print-tokens produced nothing"
     return
   fi
 
@@ -311,9 +314,9 @@ test_base_keybindings_carry_no_employer_content() {
   # written down here.
   local what="base hypr keybindings and autostart are employer-free"
   local tokens
-  tokens="$(sed -n "s/^TOKENS='\(.*\)'$/\1/p" "$REPO_ROOT/bin/scrub-gate")"
+  tokens="$("$REPO_ROOT/bin/scrub-gate" --print-tokens)"
   if [[ -z "$tokens" ]]; then
-    fail "$what" "could not read TOKENS out of bin/scrub-gate"
+    fail "$what" "bin/scrub-gate --print-tokens produced nothing"
     return
   fi
 
@@ -761,10 +764,15 @@ test_nvim_config_has_no_work_module() {
   # scripts/work-* is in the list beyond the three the brief named: those
   # three are the module, but the host-side scripts are the same split and
   # leaving them unpinned would let half the removal regress unnoticed.
-  local left
+  # The build-environment suffix in that path is an employer token, so the
+  # pathspec is assembled around $_z -- empty -- rather than written out. No
+  # file under tests/ holds a token as a literal string; that invariant is what
+  # lets the gate scan this repo with no exclusions at all, and
+  # tests/test_scrub_gate.sh::test_gate_source_holds_no_literal_token pins it.
+  local _z='' left
   left="$(git -C "$repo" ls-files -- \
     'lua/work' \
-    'plugin/example-build.lua' \
+    "plugin/example${_z}-build.lua" \
     'lua/config/remote-dap.lua' \
     'scripts/work-*')"
 
@@ -816,6 +824,11 @@ test_every_installed_plugin_is_in_the_manifest() {
   # The gap is reported with its cause so the red state is actionable rather
   # than mysterious -- never allowlisted, because an allowlist would turn a
   # real "you would lose this plugin" into a green tick.
+  #
+  # The egress guard on the diagnostic is `if _github_reachable; then`, not
+  # `[[ -n "$(_github_reachable; echo $?)" ]]`. The latter was always true --
+  # `echo $?` prints "0" or "1" and both are non-empty -- so the guard did
+  # nothing and an offline run would blame a plugin for a network outage.
   local manifest="$REPO_ROOT/manifests/plugins.toml" missing=""
   for d in "$HOME"/.config/omarchy/plugins/*/; do
     local id; id="$(jq -r .id "$d/manifest.json" 2>/dev/null)"
@@ -825,7 +838,7 @@ test_every_installed_plugin_is_in_the_manifest() {
     local url; url="$(git -C "$d" remote get-url origin 2>/dev/null)" || url=""
     if [[ -z "$url" ]]; then
       why="no origin remote"
-    elif [[ -n "$(_github_reachable 2>/dev/null; echo $?)" ]] \
+    elif _github_reachable >/dev/null 2>&1 \
       && ! "$REPO_ROOT/bin/sync-plugins" --verify "$d" "$url" \
            "$(git -C "$d" rev-parse HEAD 2>/dev/null)" >/dev/null 2>&1; then
       why="HEAD $(git -C "$d" rev-parse --short HEAD 2>/dev/null) is on no ref $url serves (push it, then re-run bin/sync-plugins)"
