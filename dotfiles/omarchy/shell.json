@@ -54,10 +54,13 @@
       ],
       "right": [
         {
-          "id": "vleeuwenmenno.sshtunnels"
+          "id": "vhr.corne"
         },
         {
           "id": "io.github.rvcabc.logitech"
+        },
+        {
+          "id": "vleeuwenmenno.sshtunnels"
         },
         {
           "id": "io.github.rizmi.portwatch"
@@ -104,6 +107,9 @@
     },
     {
       "id": "capra_vhr.battery"
+    },
+    {
+      "id": "omannotate"
     }
   ],
   "version": 1,
